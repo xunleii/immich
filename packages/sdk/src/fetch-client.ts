@@ -646,6 +646,14 @@ export type CalendarHeatmapResponseDto = {
     /** Total activity count over the period */
     totalCount: number;
 };
+export type ClusterGroupAdminMembersResponseDto = {
+    /** Users currently sharing facial recognition (named people) with this account, including itself. */
+    members: UserResponseDto[];
+};
+export type ClusterGroupAdminAddMemberDto = {
+    /** User to merge into this account's cluster group. Both accounts will then share the same named (recognized) people across their libraries. Bypasses the normal invite/accept flow - admin only. */
+    userId: string;
+};
 export type AlbumsResponse = {
     defaultAssetOrder: AssetOrder;
 };
@@ -3987,6 +3995,50 @@ export function getUserCalendarHeatmapAdmin({ $from, id, to, $type }: {
         "type": $type
     }))}`, {
         ...opts
+    }));
+}
+/**
+ * Retrieve cluster group members
+ */
+export function getUserClusterGroupMembersAdmin({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: ClusterGroupAdminMembersResponseDto;
+    }>(`/admin/users/${encodeURIComponent(id)}/cluster-group/members`, {
+        ...opts
+    }));
+}
+/**
+ * Add a cluster group member
+ */
+export function addUserClusterGroupMemberAdmin({ id, clusterGroupAdminAddMemberDto }: {
+    id: string;
+    clusterGroupAdminAddMemberDto: ClusterGroupAdminAddMemberDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: ClusterGroupAdminMembersResponseDto;
+    }>(`/admin/users/${encodeURIComponent(id)}/cluster-group/members`, oazapfts.json({
+        ...opts,
+        method: "PUT",
+        body: clusterGroupAdminAddMemberDto
+    })));
+}
+/**
+ * Remove a cluster group member
+ */
+export function removeUserClusterGroupMemberAdmin({ id, memberId }: {
+    id: string;
+    memberId: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: ClusterGroupAdminMembersResponseDto;
+    }>(`/admin/users/${encodeURIComponent(id)}/cluster-group/members/${encodeURIComponent(memberId)}`, {
+        ...opts,
+        method: "DELETE"
     }));
 }
 /**

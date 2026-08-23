@@ -4,6 +4,10 @@ import { Endpoint, HistoryBuilder } from 'src/decorators';
 import { AssetStatsDto, AssetStatsResponseDto } from 'src/dtos/asset.dto';
 import { AuthDto } from 'src/dtos/auth.dto';
 import { CalendarHeatmapDto, CalendarHeatmapResponseDto } from 'src/dtos/calendar-heatmap.dto';
+import {
+  ClusterGroupAdminAddMemberDto,
+  ClusterGroupAdminMembersResponseDto,
+} from 'src/dtos/cluster-group-admin.dto';
 import { SessionResponseDto } from 'src/dtos/session.dto';
 import { UserPreferencesResponseDto, UserPreferencesUpdateDto } from 'src/dtos/user-preferences.dto';
 import {
@@ -228,5 +232,54 @@ export class UserAdminController {
     @Body() dto: UserShareAllowlistUpdateDto,
   ): Promise<UserShareAllowlistResponseDto> {
     return this.service.updateShareAllowlist(auth, id, dto);
+  }
+
+  @Get(':id/cluster-group/members')
+  @Authenticated({ permission: Permission.AdminUserRead, admin: true })
+  @Endpoint({
+    summary: 'Retrieve cluster group members',
+    description:
+      'Retrieve the users currently sharing facial recognition (named people) with this account, including itself.',
+    history: new HistoryBuilder().added('v1').stable('v1'),
+  })
+  getUserClusterGroupMembersAdmin(
+    @Auth() auth: AuthDto,
+    @Param() { id }: UUIDParamDto,
+  ): Promise<ClusterGroupAdminMembersResponseDto> {
+    return this.service.getClusterGroupMembers(auth, id);
+  }
+
+  @Put(':id/cluster-group/members')
+  @Authenticated({ permission: Permission.AdminUserUpdate, admin: true })
+  @Endpoint({
+    summary: 'Add a cluster group member',
+    description:
+      "Merge another user's cluster group into this account's, so both accounts share the same named " +
+      '(recognized) people. Bypasses the normal invite/accept flow.',
+    history: new HistoryBuilder().added('v1').stable('v1'),
+  })
+  addUserClusterGroupMemberAdmin(
+    @Auth() auth: AuthDto,
+    @Param() { id }: UUIDParamDto,
+    @Body() dto: ClusterGroupAdminAddMemberDto,
+  ): Promise<ClusterGroupAdminMembersResponseDto> {
+    return this.service.addClusterGroupMember(auth, id, dto);
+  }
+
+  @Delete(':id/cluster-group/members/:memberId')
+  @Authenticated({ permission: Permission.AdminUserUpdate, admin: true })
+  @Endpoint({
+    summary: 'Remove a cluster group member',
+    description:
+      "Remove a user from this account's cluster group, giving them a fresh cluster group of their own. " +
+      'Stops sharing facial recognition data between the two accounts.',
+    history: new HistoryBuilder().added('v1').stable('v1'),
+  })
+  removeUserClusterGroupMemberAdmin(
+    @Auth() auth: AuthDto,
+    @Param('id') id: string,
+    @Param('memberId') memberId: string,
+  ): Promise<ClusterGroupAdminMembersResponseDto> {
+    return this.service.removeClusterGroupMember(auth, id, memberId);
   }
 }

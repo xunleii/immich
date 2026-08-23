@@ -3,6 +3,7 @@ import { mapUserAdmin } from 'src/dtos/user.dto';
 import { JobName, UserStatus } from 'src/enum';
 import { UserAdminService } from 'src/services/user-admin.service';
 import { AuthFactory } from 'test/factories/auth.factory';
+import { ClusterGroupFactory } from 'test/factories/cluster-group.factory';
 import { UserFactory } from 'test/factories/user.factory';
 import { authStub } from 'test/fixtures/auth.stub';
 import { userStub } from 'test/fixtures/user.stub';
@@ -178,6 +179,92 @@ describe(UserAdminService.name, () => {
       mocks.user.restore.mockResolvedValue(userStub.user1);
       await expect(sut.restore(authStub.admin, userStub.user1.id)).resolves.toEqual(mapUserAdmin(userStub.user1));
       expect(mocks.user.restore).toHaveBeenCalledWith(userStub.user1.id);
+    });
+  });
+
+  describe('getClusterGroupMembers', () => {
+    it('should list the members of the cluster group', async () => {
+      const owner = UserFactory.create({ clusterGroupId: 'cluster-a' });
+      const member = UserFactory.create({ clusterGroupId: 'cluster-a' });
+      mocks.user.get.mockResolvedValue(owner);
+      mocks.clusterGroup.getUsers.mockResolvedValue([owner, member]);
+
+      const result = await sut.getClusterGroupMembers(authStub.admin, owner.id);
+
+      expect(mocks.clusterGroup.getUsers).toHaveBeenCalledWith({ clusterGroupId: 'cluster-a', userId: owner.id });
+      expect(result.members).toHaveLength(2);
+    });
+  });
+
+  describe('addClusterGroupMember', () => {
+    it('should reject adding a user to their own cluster group', async () => {
+      await expect(
+        sut.addClusterGroupMember(authStub.admin, userStub.admin.id, { userId: userStub.admin.id }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(mocks.person.reassignCluster).not.toHaveBeenCalled();
+    });
+
+    it('should reject if the target is already in the same cluster group', async () => {
+      const owner = UserFactory.create({ clusterGroupId: 'cluster-a' });
+      const target = UserFactory.create({ clusterGroupId: 'cluster-a' });
+      mocks.user.get.mockImplementation((userId) =>
+        Promise.resolve([owner, target].find((user) => user.id === userId)),
+      );
+
+      await expect(
+        sut.addClusterGroupMember(authStub.admin, owner.id, { userId: target.id }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(mocks.person.reassignCluster).not.toHaveBeenCalled();
+    });
+
+    it('should merge the target user into the cluster group', async () => {
+      const owner = UserFactory.create({ clusterGroupId: 'cluster-a' });
+      const target = UserFactory.create({ clusterGroupId: 'cluster-b' });
+      mocks.user.get.mockImplementation((userId) =>
+        Promise.resolve([owner, target].find((user) => user.id === userId)),
+      );
+      mocks.clusterGroup.getUsers.mockResolvedValue([owner, target]);
+
+      await sut.addClusterGroupMember(authStub.admin, owner.id, { userId: target.id });
+
+      expect(mocks.person.reassignCluster).toHaveBeenCalledWith({
+        userId: target.id,
+        newClusterId: 'cluster-a',
+      });
+      expect(mocks.user.update).toHaveBeenCalledWith(target.id, { clusterGroupId: 'cluster-a' });
+    });
+  });
+
+  describe('removeClusterGroupMember', () => {
+    it('should reject removing a user not in the cluster group', async () => {
+      const owner = UserFactory.create({ clusterGroupId: 'cluster-a' });
+      const other = UserFactory.create({ clusterGroupId: 'cluster-b' });
+      mocks.user.get.mockImplementation((userId) =>
+        Promise.resolve([owner, other].find((user) => user.id === userId)),
+      );
+
+      await expect(
+        sut.removeClusterGroupMember(authStub.admin, owner.id, other.id),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(mocks.person.reassignCluster).not.toHaveBeenCalled();
+    });
+
+    it('should give the removed member a fresh cluster group', async () => {
+      const owner = UserFactory.create({ clusterGroupId: 'cluster-a' });
+      const member = UserFactory.create({ clusterGroupId: 'cluster-a' });
+      mocks.user.get.mockImplementation((userId) =>
+        Promise.resolve([owner, member].find((user) => user.id === userId)),
+      );
+      mocks.clusterGroup.create.mockResolvedValue(ClusterGroupFactory.create({ id: 'new-cluster' }));
+      mocks.clusterGroup.getUsers.mockResolvedValue([owner]);
+
+      await sut.removeClusterGroupMember(authStub.admin, owner.id, member.id);
+
+      expect(mocks.person.reassignCluster).toHaveBeenCalledWith({
+        userId: member.id,
+        newClusterId: 'new-cluster',
+      });
+      expect(mocks.user.update).toHaveBeenCalledWith(member.id, { clusterGroupId: 'new-cluster' });
     });
   });
 });

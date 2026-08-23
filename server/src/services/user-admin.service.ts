@@ -3,6 +3,10 @@ import { SALT_ROUNDS } from 'src/constants';
 import { AssetStatsDto, AssetStatsResponseDto, mapStats } from 'src/dtos/asset.dto';
 import { AuthDto } from 'src/dtos/auth.dto';
 import { CalendarHeatmapDto, CalendarHeatmapResponseDto } from 'src/dtos/calendar-heatmap.dto';
+import {
+  ClusterGroupAdminAddMemberDto,
+  ClusterGroupAdminMembersResponseDto,
+} from 'src/dtos/cluster-group-admin.dto';
 import { SessionResponseDto, mapSession } from 'src/dtos/session.dto';
 import { UserPreferencesResponseDto, UserPreferencesUpdateDto, mapPreferences } from 'src/dtos/user-preferences.dto';
 import {
@@ -187,6 +191,68 @@ export class UserAdminService extends BaseService {
 
     const allowlist = await this.userRepository.getShareAllowlist(id);
     return { allowedUsers: allowlist.map((user) => mapUser(user)) };
+  }
+
+  // --- cluster group (facial recognition sharing), admin-managed ---
+
+  async getClusterGroupMembers(auth: AuthDto, id: string): Promise<ClusterGroupAdminMembersResponseDto> {
+    const user = await this.findOrFail(id, {});
+    const members = await this.clusterGroupRepository.getUsers({ clusterGroupId: user.clusterGroupId, userId: id });
+    return { members: members.map((member) => mapUser(member)) };
+  }
+
+  /**
+   * Merges `userId` into `id`'s cluster group: from then on both accounts
+   * share the same named (recognized) people. Unlike the self-service
+   * cluster group request/accept flow, this is admin-forced and needs no
+   * consent from either account.
+   */
+  async addClusterGroupMember(
+    auth: AuthDto,
+    id: string,
+    { userId }: ClusterGroupAdminAddMemberDto,
+  ): Promise<ClusterGroupAdminMembersResponseDto> {
+    if (userId === id) {
+      throw new BadRequestException('User is already a member of their own cluster group');
+    }
+
+    const user = await this.findOrFail(id, {});
+    const target = await this.findOrFail(userId, {});
+
+    if (target.clusterGroupId === user.clusterGroupId) {
+      throw new BadRequestException('User is already a member of this cluster group');
+    }
+
+    await this.personRepository.reassignCluster({ userId, newClusterId: user.clusterGroupId });
+    await this.userRepository.update(userId, { clusterGroupId: user.clusterGroupId });
+
+    return this.getClusterGroupMembers(auth, id);
+  }
+
+  /**
+   * Removes `memberId` from `id`'s cluster group, giving them a fresh
+   * solo cluster group of their own (mirrors the self-service "leave").
+   */
+  async removeClusterGroupMember(
+    auth: AuthDto,
+    id: string,
+    memberId: string,
+  ): Promise<ClusterGroupAdminMembersResponseDto> {
+    const user = await this.findOrFail(id, {});
+    const member = await this.findOrFail(memberId, {});
+
+    if (member.clusterGroupId !== user.clusterGroupId) {
+      throw new BadRequestException('User is not a member of this cluster group');
+    }
+    if (memberId === id) {
+      throw new BadRequestException('Cannot remove the account itself from its own cluster group this way');
+    }
+
+    const newClusterGroup = await this.clusterGroupRepository.create();
+    await this.personRepository.reassignCluster({ userId: memberId, newClusterId: newClusterGroup.id });
+    await this.userRepository.update(memberId, { clusterGroupId: newClusterGroup.id });
+
+    return this.getClusterGroupMembers(auth, id);
   }
 
   private findOrFail(id: string, options: UserFindOptions) {

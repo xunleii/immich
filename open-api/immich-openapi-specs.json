@@ -1803,6 +1803,194 @@
         "x-immich-state": "Stable"
       }
     },
+    "/admin/users/{id}/cluster-group/members": {
+      "get": {
+        "description": "Retrieve the users currently sharing facial recognition (named people) with this account, including itself.",
+        "operationId": "getUserClusterGroupMembersAdmin",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterGroupAdminMembersResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve cluster group members",
+        "tags": [
+          "Users (admin)"
+        ],
+        "x-immich-admin-only": true,
+        "x-immich-history": [
+          {
+            "version": "v1",
+            "state": "Added"
+          },
+          {
+            "version": "v1",
+            "state": "Stable"
+          }
+        ],
+        "x-immich-permission": "adminUser.read",
+        "x-immich-state": "Stable"
+      },
+      "put": {
+        "description": "Merge another user's cluster group into this account's, so both accounts share the same named (recognized) people. Bypasses the normal invite/accept flow.",
+        "operationId": "addUserClusterGroupMemberAdmin",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClusterGroupAdminAddMemberDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterGroupAdminMembersResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Add a cluster group member",
+        "tags": [
+          "Users (admin)"
+        ],
+        "x-immich-admin-only": true,
+        "x-immich-history": [
+          {
+            "version": "v1",
+            "state": "Added"
+          },
+          {
+            "version": "v1",
+            "state": "Stable"
+          }
+        ],
+        "x-immich-permission": "adminUser.update",
+        "x-immich-state": "Stable"
+      }
+    },
+    "/admin/users/{id}/cluster-group/members/{memberId}": {
+      "delete": {
+        "description": "Remove a user from this account's cluster group, giving them a fresh cluster group of their own. Stops sharing facial recognition data between the two accounts.",
+        "operationId": "removeUserClusterGroupMemberAdmin",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "memberId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterGroupAdminMembersResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Remove a cluster group member",
+        "tags": [
+          "Users (admin)"
+        ],
+        "x-immich-admin-only": true,
+        "x-immich-history": [
+          {
+            "version": "v1",
+            "state": "Added"
+          },
+          {
+            "version": "v1",
+            "state": "Stable"
+          }
+        ],
+        "x-immich-permission": "adminUser.update",
+        "x-immich-state": "Stable"
+      }
+    },
     "/admin/users/{id}/preferences": {
       "get": {
         "description": "Retrieve the preferences of a specific user.",
@@ -20996,6 +21184,35 @@
         "required": [
           "newPassword",
           "password"
+        ],
+        "type": "object"
+      },
+      "ClusterGroupAdminAddMemberDto": {
+        "properties": {
+          "userId": {
+            "description": "User to merge into this account's cluster group. Both accounts will then share the same named (recognized) people across their libraries. Bypasses the normal invite/accept flow - admin only.",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId"
+        ],
+        "type": "object"
+      },
+      "ClusterGroupAdminMembersResponseDto": {
+        "properties": {
+          "members": {
+            "description": "Users currently sharing facial recognition (named people) with this account, including itself.",
+            "items": {
+              "$ref": "#/components/schemas/UserResponseDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "members"
         ],
         "type": "object"
       },

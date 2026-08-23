@@ -8,6 +8,7 @@
   import DeviceCard from '$lib/components/user-settings-page/DeviceCard.svelte';
   import FeatureSetting from './FeatureSetting.svelte';
   import ShareAllowlistAddModal from '$lib/modals/ShareAllowlistAddModal.svelte';
+  import ClusterGroupAdminAddModal from '$lib/modals/ClusterGroupAdminAddModal.svelte';
   import { Route } from '$lib/route';
   import { getUserAdminActions } from '$lib/services/user-admin.service';
   import { locale } from '$lib/stores/preferences.store';
@@ -18,6 +19,8 @@
     CalendarHeatmapType,
     getUserCalendarHeatmapAdmin,
     updateUserShareAllowlistAdmin,
+    addUserClusterGroupMemberAdmin,
+    removeUserClusterGroupMemberAdmin,
     type UserAdminResponseDto,
     type UserResponseDto,
   } from '@immich/sdk';
@@ -49,6 +52,7 @@
     mdiCheckCircle,
     mdiCloudUploadOutline,
     mdiDevices,
+    mdiFaceRecognition,
     mdiFeatureSearchOutline,
     mdiPlayCircle,
     mdiPlusBoxOutline,
@@ -68,7 +72,7 @@
 
   const { children, data }: Props = $props();
 
-  const { user, userPreferences, userStatistics, userSessions, shareAllowlist } = $derived(data);
+  const { user, userPreferences, userStatistics, userSessions, shareAllowlist, clusterGroupMembers } = $derived(data);
   const usedBytes = $derived(user.quotaUsageInBytes ?? 0);
   const availableBytes = $derived(user.quotaSizeInBytes ?? 0);
   const TiB = 1024 ** 4;
@@ -133,6 +137,41 @@
       const usersToAdd = await modalManager.show(ShareAllowlistAddModal, { excludedUserIds });
       if (usersToAdd && usersToAdd.length > 0) {
         await addAllowedUsers(usersToAdd);
+      }
+    },
+  });
+
+  const addClusterGroupMember = async (userToAdd: UserResponseDto) => {
+    try {
+      await addUserClusterGroupMemberAdmin({
+        id: user.id,
+        clusterGroupAdminAddMemberDto: { userId: userToAdd.id },
+      });
+      await invalidateAll();
+      toastManager.primary($t('admin.cluster_group_member_added'));
+    } catch (error) {
+      handleError(error, $t('errors.unable_to_update_cluster_group'));
+    }
+  };
+
+  const removeClusterGroupMember = async (memberToRemove: UserResponseDto) => {
+    try {
+      await removeUserClusterGroupMemberAdmin({ id: user.id, memberId: memberToRemove.id });
+      await invalidateAll();
+      toastManager.primary($t('admin.cluster_group_member_removed'));
+    } catch (error) {
+      handleError(error, $t('errors.unable_to_update_cluster_group'));
+    }
+  };
+
+  const AddClusterGroupMember: ActionItem = $derived({
+    icon: mdiPlusBoxOutline,
+    title: $t('add'),
+    onAction: async () => {
+      const excludedUserIds = clusterGroupMembers.members.map(({ id }) => id);
+      const userToAdd = await modalManager.show(ClusterGroupAdminAddModal, { excludedUserIds });
+      if (userToAdd) {
+        await addClusterGroupMember(userToAdd);
       }
     },
   });
@@ -283,6 +322,31 @@
               </div>
             {:else}
               <span class="text-dark">{$t('admin.share_allowlist_not_active')}</span>
+            {/each}
+          </Stack>
+        </AdminCard>
+
+        <AdminCard icon={mdiFaceRecognition} title={$t('admin.cluster_group')} headerAction={AddClusterGroupMember}>
+          <Stack gap={3}>
+            <Text size="tiny" color="muted">{$t('admin.cluster_group_description')}</Text>
+            {#each clusterGroupMembers.members.filter((member) => member.id !== user.id) as member (member.id)}
+              <div class="flex w-full items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <UserAvatar user={member} size="sm" />
+                  <Text size="small">{member.name}</Text>
+                </div>
+                <IconButton
+                  color="danger"
+                  variant="ghost"
+                  shape="round"
+                  icon={mdiTrashCanOutline}
+                  aria-label={$t('remove')}
+                  size="small"
+                  onclick={() => removeClusterGroupMember(member)}
+                />
+              </div>
+            {:else}
+              <span class="text-dark">{$t('admin.cluster_group_alone')}</span>
             {/each}
           </Stack>
         </AdminCard>

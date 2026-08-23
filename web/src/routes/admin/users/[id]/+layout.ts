@@ -1,4 +1,5 @@
 import {
+  getUserClusterGroupMembersAdmin,
   getUserPreferencesAdmin,
   getUserSessionsAdmin,
   getUserShareAllowlistAdmin,
@@ -25,11 +26,12 @@ export const load = (async ({ params, url }) => {
     redirect(307, Route.users());
   }
 
-  const [userPreferences, userStatistics, userSessions, shareAllowlist] = await Promise.all([
+  const [userPreferences, userStatistics, userSessions, shareAllowlist, clusterGroupMembers] = await Promise.all([
     getUserPreferencesAdmin({ id: user.id }),
     getUserStatisticsAdmin({ id: user.id }),
     getUserSessionsAdmin({ id: user.id }),
     getUserShareAllowlistAdmin({ id: user.id }),
+    getUserClusterGroupMembersAdmin({ id: user.id }),
   ]);
 
   const $t = await getFormatter();
@@ -40,6 +42,7 @@ export const load = (async ({ params, url }) => {
     userStatistics,
     userSessions,
     shareAllowlist,
+    clusterGroupMembers,
     meta: {
       title: $t('admin.user_details'),
     },
