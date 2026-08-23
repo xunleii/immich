@@ -94,7 +94,34 @@ Procède commit par commit, jamais plusieurs à la fois :
     --abort` et documente le problème plutôt que de forcer une
     résolution qui casserait la feature silencieusement.
 
-## Tâche : ajouter une nouvelle feature au fork
+## Tâche : builder l'image Docker du fork
+
+L'image `immich-server` (backend + web statiques) se build directement
+depuis `server/Dockerfile` — inchangé par nos patches, il consomme le
+code source patché sans modification.
+
+**En local** : `docker build -f server/Dockerfile --target server .`
+build juste l'étage serveur (rapide, utile pour valider qu'un patch
+compile). Le build complet (`docker build -f server/Dockerfile .`, sans
+`--target`) inclut aussi web/cli/plugins et est nettement plus lourd —
+prévoir plusieurs Go d'espace disque libre et du temps.
+
+**En CI** : `.github/workflows/fork-build.yml` build et pousse l'image
+complète sur `ghcr.io/<owner>/immich-server` à chaque push sur
+`fork`, plus déclenchement manuel (`workflow_dispatch`). Utilise
+`docker/build-push-action` avec cache GHA — pas de secret à configurer,
+`GITHUB_TOKEN` suffit pour pousser sur GHCR (permission `packages:
+write` déjà déclarée dans le workflow).
+
+Ne touche jamais à l'image `immich-machine-learning` — ce fork ne la
+modifie pas, donc l'image officielle upstream suffit pour ce service.
+
+Avant de modifier `server/Dockerfile` lui-même (rare, seulement si un
+futur patch a besoin d'une dépendance système supplémentaire par
+exemple), valide toujours avec un build `--target server` local d'abord
+— c'est l'étage qui compile réellement notre code TypeScript patché.
+
+
 
 1. Développe sur la branche `fork` (HEAD = dernier patch appliqué).
    Utilise les commandes déjà en place comme référence de convention
