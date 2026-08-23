@@ -7,12 +7,20 @@
   import UserAvatar from '$lib/components/shared-components/UserAvatar.svelte';
   import DeviceCard from '$lib/components/user-settings-page/DeviceCard.svelte';
   import FeatureSetting from './FeatureSetting.svelte';
+  import ShareAllowlistAddModal from '$lib/modals/ShareAllowlistAddModal.svelte';
   import { Route } from '$lib/route';
   import { getUserAdminActions } from '$lib/services/user-admin.service';
   import { locale } from '$lib/stores/preferences.store';
   import { createDateFormatter, findLocale } from '$lib/utils';
+  import { handleError } from '$lib/utils/handle-error';
   import { getBytesWithUnit } from '$lib/utils/byte-units';
-  import { CalendarHeatmapType, getUserCalendarHeatmapAdmin, type UserAdminResponseDto } from '@immich/sdk';
+  import {
+    CalendarHeatmapType,
+    getUserCalendarHeatmapAdmin,
+    updateUserShareAllowlistAdmin,
+    type UserAdminResponseDto,
+    type UserResponseDto,
+  } from '@immich/sdk';
   import {
     Alert,
     Badge,
@@ -23,12 +31,17 @@
     getByteUnitString,
     Heading,
     Icon,
+    IconButton,
     MenuItemType,
     Meter,
     Stack,
     Text,
+    modalManager,
+    toastManager,
+    type ActionItem,
   } from '@immich/ui';
   import {
+    mdiAccountCheckOutline,
     mdiAccountOutline,
     mdiCameraIris,
     mdiChartPie,
@@ -38,6 +51,7 @@
     mdiDevices,
     mdiFeatureSearchOutline,
     mdiPlayCircle,
+    mdiPlusBoxOutline,
     mdiTrashCanOutline,
   } from '@mdi/js';
   import type { Snippet } from 'svelte';
@@ -54,7 +68,7 @@
 
   const { children, data }: Props = $props();
 
-  const { user, userPreferences, userStatistics, userSessions } = $derived(data);
+  const { user, userPreferences, userStatistics, userSessions, shareAllowlist } = $derived(data);
   const usedBytes = $derived(user.quotaUsageInBytes ?? 0);
   const availableBytes = $derived(user.quotaSizeInBytes ?? 0);
   const TiB = 1024 ** 4;
@@ -87,6 +101,41 @@
       await goto(Route.users());
     }
   };
+
+  const saveShareAllowlist = async (allowedUserIds: string[]) => {
+    try {
+      await updateUserShareAllowlistAdmin({
+        id: user.id,
+        userShareAllowlistUpdateDto: { allowedUserIds },
+      });
+      await invalidateAll();
+      toastManager.primary($t('admin.share_allowlist_updated'));
+    } catch (error) {
+      handleError(error, $t('errors.unable_to_update_share_allowlist'));
+    }
+  };
+
+  const addAllowedUsers = async (usersToAdd: UserResponseDto[]) => {
+    const allowedUserIds = [...shareAllowlist.allowedUsers.map(({ id }) => id), ...usersToAdd.map(({ id }) => id)];
+    await saveShareAllowlist(allowedUserIds);
+  };
+
+  const removeAllowedUser = async (userToRemove: UserResponseDto) => {
+    const allowedUserIds = shareAllowlist.allowedUsers.filter(({ id }) => id !== userToRemove.id).map(({ id }) => id);
+    await saveShareAllowlist(allowedUserIds);
+  };
+
+  const AddAllowedUser: ActionItem = $derived({
+    icon: mdiPlusBoxOutline,
+    title: $t('add'),
+    onAction: async () => {
+      const excludedUserIds = [user.id, ...shareAllowlist.allowedUsers.map(({ id }) => id)];
+      const usersToAdd = await modalManager.show(ShareAllowlistAddModal, { excludedUserIds });
+      if (usersToAdd && usersToAdd.length > 0) {
+        await addAllowedUsers(usersToAdd);
+      }
+    },
+  });
 </script>
 
 <OnEvents
@@ -209,6 +258,31 @@
               <DeviceCard {session} />
             {:else}
               <span class="text-dark">{$t('no_devices')}</span>
+            {/each}
+          </Stack>
+        </AdminCard>
+
+        <AdminCard icon={mdiAccountCheckOutline} title={$t('admin.share_allowlist')} headerAction={AddAllowedUser}>
+          <Stack gap={3}>
+            <Text size="tiny" color="muted">{$t('admin.share_allowlist_description')}</Text>
+            {#each shareAllowlist.allowedUsers as allowedUser (allowedUser.id)}
+              <div class="flex w-full items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <UserAvatar user={allowedUser} size="sm" />
+                  <Text size="small">{allowedUser.name}</Text>
+                </div>
+                <IconButton
+                  color="danger"
+                  variant="ghost"
+                  shape="round"
+                  icon={mdiTrashCanOutline}
+                  aria-label={$t('remove')}
+                  size="small"
+                  onclick={() => removeAllowedUser(allowedUser)}
+                />
+              </div>
+            {:else}
+              <span class="text-dark">{$t('admin.share_allowlist_not_active')}</span>
             {/each}
           </Stack>
         </AdminCard>

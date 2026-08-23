@@ -11,6 +11,9 @@ import {
   UserAdminResponseDto,
   UserAdminSearchDto,
   UserAdminUpdateDto,
+  UserShareAllowlistResponseDto,
+  UserShareAllowlistUpdateDto,
+  mapUser,
   mapUserAdmin,
 } from 'src/dtos/user.dto';
 import { JobName, UserMetadataKey, UserStatus } from 'src/enum';
@@ -157,6 +160,33 @@ export class UserAdminService extends BaseService {
     });
 
     return mapPreferences(newPreferences);
+  }
+
+  async getShareAllowlist(auth: AuthDto, id: string): Promise<UserShareAllowlistResponseDto> {
+    await this.findOrFail(id, {});
+    const allowlist = await this.userRepository.getShareAllowlist(id);
+    return { allowedUsers: allowlist.map((user) => mapUser(user)) };
+  }
+
+  async updateShareAllowlist(
+    auth: AuthDto,
+    id: string,
+    { allowedUserIds }: UserShareAllowlistUpdateDto,
+  ): Promise<UserShareAllowlistResponseDto> {
+    await this.findOrFail(id, {});
+
+    const uniqueIds = [...new Set(allowedUserIds)].filter((allowedId) => allowedId !== id);
+    for (const allowedId of uniqueIds) {
+      const exists = await this.userRepository.get(allowedId, {});
+      if (!exists) {
+        throw new BadRequestException(`Invalid user id: ${allowedId}`);
+      }
+    }
+
+    await this.userRepository.setShareAllowlist(id, uniqueIds, auth.user.id);
+
+    const allowlist = await this.userRepository.getShareAllowlist(id);
+    return { allowedUsers: allowlist.map((user) => mapUser(user)) };
   }
 
   private findOrFail(id: string, options: UserFindOptions) {

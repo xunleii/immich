@@ -94,6 +94,25 @@ describe(UserService.name, () => {
     });
   });
 
+  describe('getMyShareAllowlist', () => {
+    it('should return an empty list when the allowlist is inactive', async () => {
+      mocks.user.getShareAllowlist.mockResolvedValue([]);
+
+      await expect(sut.getMyShareAllowlist(authStub.admin)).resolves.toEqual({ allowedUsers: [] });
+      expect(mocks.user.getShareAllowlist).toHaveBeenCalledWith(authStub.admin.user.id);
+    });
+
+    it('should return the allowed users when the allowlist is active', async () => {
+      const allowed = UserFactory.create();
+      mocks.user.getShareAllowlist.mockResolvedValue([allowed] as any);
+
+      const result = await sut.getMyShareAllowlist(authStub.admin);
+
+      expect(result.allowedUsers).toHaveLength(1);
+      expect(result.allowedUsers[0]).toMatchObject({ id: allowed.id, email: allowed.email });
+    });
+  });
+
   describe('createProfileImage', () => {
     it('should throw an error if the user does not exist', async () => {
       const file = { path: '/profile/path' } as Express.Multer.File;

@@ -2069,6 +2069,130 @@
         "x-immich-state": "Stable"
       }
     },
+    "/admin/users/{id}/share-allowlist": {
+      "get": {
+        "description": "Retrieve the list of users this account is allowed to share albums/assets with. An empty list means the allowlist is not active for this account (sharing is unrestricted).",
+        "operationId": "getUserShareAllowlistAdmin",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserShareAllowlistResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve share allowlist",
+        "tags": [
+          "Users (admin)"
+        ],
+        "x-immich-admin-only": true,
+        "x-immich-history": [
+          {
+            "version": "v1",
+            "state": "Added"
+          },
+          {
+            "version": "v1",
+            "state": "Stable"
+          }
+        ],
+        "x-immich-permission": "adminUser.read",
+        "x-immich-state": "Stable"
+      },
+      "put": {
+        "description": "Replace the list of users this account is allowed to share albums/assets with. Pass an empty array to disable the allowlist for this account (reverts to unrestricted sharing).",
+        "operationId": "updateUserShareAllowlistAdmin",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserShareAllowlistUpdateDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserShareAllowlistResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Update share allowlist",
+        "tags": [
+          "Users (admin)"
+        ],
+        "x-immich-admin-only": true,
+        "x-immich-history": [
+          {
+            "version": "v1",
+            "state": "Added"
+          },
+          {
+            "version": "v1",
+            "state": "Stable"
+          }
+        ],
+        "x-immich-permission": "adminUser.update",
+        "x-immich-state": "Stable"
+      }
+    },
     "/admin/users/{id}/statistics": {
       "get": {
         "description": "Retrieve asset statistics for a specific user.",
@@ -16504,6 +16628,52 @@
         "x-immich-state": "Deprecated"
       }
     },
+    "/users/me/share-allowlist": {
+      "get": {
+        "description": "Retrieve the list of users the current account is allowed to share albums/assets with. An empty list means the allowlist is not active (sharing is unrestricted).",
+        "operationId": "getMyShareAllowlist",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserShareAllowlistResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve my share allowlist",
+        "tags": [
+          "Users"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v1",
+            "state": "Added"
+          },
+          {
+            "version": "v1",
+            "state": "Stable"
+          }
+        ],
+        "x-immich-permission": "user.read",
+        "x-immich-state": "Stable"
+      }
+    },
     "/users/profile-image": {
       "delete": {
         "description": "Delete the profile image of the current user.",
@@ -29522,6 +29692,38 @@
           "name",
           "profileChangedAt",
           "profileImagePath"
+        ],
+        "type": "object"
+      },
+      "UserShareAllowlistResponseDto": {
+        "properties": {
+          "allowedUsers": {
+            "description": "Users this account is allowed to share with. An empty array means the allowlist is not active (unrestricted sharing), not that sharing is fully blocked.",
+            "items": {
+              "$ref": "#/components/schemas/UserResponseDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "allowedUsers"
+        ],
+        "type": "object"
+      },
+      "UserShareAllowlistUpdateDto": {
+        "properties": {
+          "allowedUserIds": {
+            "description": "IDs of the users this account is allowed to share albums/assets with. An empty array disables the allowlist for this account (reverts to unrestricted sharing) rather than allowing nobody.",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "allowedUserIds"
         ],
         "type": "object"
       },

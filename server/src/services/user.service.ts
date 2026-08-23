@@ -10,7 +10,14 @@ import { LicenseKeyDto, LicenseResponseDto } from 'src/dtos/license.dto';
 import { OnboardingDto, OnboardingResponseDto } from 'src/dtos/onboarding.dto';
 import { UserPreferencesResponseDto, UserPreferencesUpdateDto, mapPreferences } from 'src/dtos/user-preferences.dto';
 import { CreateProfileImageResponseDto } from 'src/dtos/user-profile.dto';
-import { UserAdminResponseDto, UserResponseDto, UserUpdateMeDto, mapUser, mapUserAdmin } from 'src/dtos/user.dto';
+import {
+  UserAdminResponseDto,
+  UserResponseDto,
+  UserShareAllowlistResponseDto,
+  UserUpdateMeDto,
+  mapUser,
+  mapUserAdmin,
+} from 'src/dtos/user.dto';
 import { CacheControl, JobName, JobStatus, QueueName, StorageFolder, UserMetadataKey } from 'src/enum';
 import { ArgOf } from 'src/repositories/event.repository';
 import { UserFindOptions } from 'src/repositories/user.repository';
@@ -47,6 +54,17 @@ export class UserService extends BaseService {
     }
 
     return mapUserAdmin(user);
+  }
+
+  /**
+   * The current account's own share allowlist. An empty `allowedUsers`
+   * means the allowlist is inactive (sharing is unrestricted). Used by
+   * the web client to pre-filter the "share with" user picker so a
+   * restricted user only sees the people they may actually share with.
+   */
+  async getMyShareAllowlist(auth: AuthDto): Promise<UserShareAllowlistResponseDto> {
+    const allowlist = await this.userRepository.getShareAllowlist(auth.user.id);
+    return { allowedUsers: allowlist.map((user) => mapUser(user)) };
   }
 
   getCalendarHeatmap(auth: AuthDto, dto: CalendarHeatmapDto): Promise<CalendarHeatmapResponseDto> {

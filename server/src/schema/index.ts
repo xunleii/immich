@@ -85,6 +85,7 @@ import { TagTable } from 'src/schema/tables/tag.table';
 import { UserAuditTable } from 'src/schema/tables/user-audit.table';
 import { UserMetadataAuditTable } from 'src/schema/tables/user-metadata-audit.table';
 import { UserMetadataTable } from 'src/schema/tables/user-metadata.table';
+import { UserShareAllowlistTable } from 'src/schema/tables/user-share-allowlist.table';
 import { UserTable } from 'src/schema/tables/user.table';
 import { VersionHistoryTable } from 'src/schema/tables/version-history.table';
 import {
@@ -155,6 +156,7 @@ export class ImmichDatabase {
     UserAuditTable,
     UserMetadataTable,
     UserMetadataAuditTable,
+    UserShareAllowlistTable,
     UserTable,
     VersionHistoryTable,
     VideoStreamSessionTable,
@@ -283,6 +285,7 @@ export interface DB {
   user_audit: UserAuditTable;
   user_metadata: UserMetadataTable;
   user_metadata_audit: UserMetadataAuditTable;
+  user_share_allowlist: UserShareAllowlistTable;
 
   version_history: VersionHistoryTable;
 

@@ -1,4 +1,10 @@
-import { getUserPreferencesAdmin, getUserSessionsAdmin, getUserStatisticsAdmin, searchUsersAdmin } from '@immich/sdk';
+import {
+  getUserPreferencesAdmin,
+  getUserSessionsAdmin,
+  getUserShareAllowlistAdmin,
+  getUserStatisticsAdmin,
+  searchUsersAdmin,
+} from '@immich/sdk';
 import { redirect } from '@sveltejs/kit';
 import { UUID_REGEX } from '$lib/constants';
 import { Route } from '$lib/route';
@@ -19,10 +25,11 @@ export const load = (async ({ params, url }) => {
     redirect(307, Route.users());
   }
 
-  const [userPreferences, userStatistics, userSessions] = await Promise.all([
+  const [userPreferences, userStatistics, userSessions, shareAllowlist] = await Promise.all([
     getUserPreferencesAdmin({ id: user.id }),
     getUserStatisticsAdmin({ id: user.id }),
     getUserSessionsAdmin({ id: user.id }),
+    getUserShareAllowlistAdmin({ id: user.id }),
   ]);
 
   const $t = await getFormatter();
@@ -32,6 +39,7 @@ export const load = (async ({ params, url }) => {
     userPreferences,
     userStatistics,
     userSessions,
+    shareAllowlist,
     meta: {
       title: $t('admin.user_details'),
     },

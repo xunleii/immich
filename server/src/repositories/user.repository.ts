@@ -325,4 +325,96 @@ export class UserRepository {
 
     await query.execute();
   }
+
+  // --- user share allowlist (admin-managed, opt-in per user) ---
+
+  /**
+   * Returns true when `ownerId` is allowed to share with `targetId`.
+   *
+   * If `ownerId` has no rows in `user_share_allowlist`, the allowlist is
+   * not active for them and sharing is unrestricted (default behavior).
+   * As soon as they have at least one row, they may ONLY share with the
+   * users in that list.
+   */
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID] })
+  async isShareAllowed(ownerId: string, targetId: string): Promise<boolean> {
+    if (ownerId === targetId) {
+      return true;
+    }
+
+    const allowlist = await this.db
+      .selectFrom('user_share_allowlist')
+      .select('allowedUserId')
+      .where('ownerId', '=', asUuid(ownerId))
+      .execute();
+
+    if (allowlist.length === 0) {
+      // allowlist not enabled for this user => unrestricted
+      return true;
+    }
+
+    return allowlist.some((row) => row.allowedUserId === targetId);
+  }
+
+  /**
+   * Filters `targetIds` down to the ones `ownerId` is NOT allowed to share
+   * with, given their allowlist (if any). Empty array means every target
+   * is allowed (either the allowlist is inactive, or all targets are on it).
+   */
+  @GenerateSql({ params: [DummyValue.UUID, [DummyValue.UUID]] })
+  async getDisallowedTargets(ownerId: string, targetIds: string[]): Promise<string[]> {
+    if (targetIds.length === 0) {
+      return [];
+    }
+
+    const allowlist = await this.db
+      .selectFrom('user_share_allowlist')
+      .select('allowedUserId')
+      .where('ownerId', '=', asUuid(ownerId))
+      .execute();
+
+    if (allowlist.length === 0) {
+      // allowlist not enabled for this user => everything is allowed
+      return [];
+    }
+
+    const allowed = new Set(allowlist.map((row) => row.allowedUserId));
+    return targetIds.filter((id) => !allowed.has(id));
+  }
+
+  @GenerateSql({ params: [DummyValue.UUID] })
+  async getShareAllowlist(ownerId: string) {
+    return this.db
+      .selectFrom('user_share_allowlist')
+      .innerJoin('user', 'user.id', 'user_share_allowlist.allowedUserId')
+      .select(['user_share_allowlist.allowedUserId', 'user_share_allowlist.createdAt', ...columns.user])
+      .where('user_share_allowlist.ownerId', '=', asUuid(ownerId))
+      .where('user.deletedAt', 'is', null)
+      .execute();
+  }
+
+  /**
+   * Replaces the full allowlist for `ownerId`. Passing an empty array
+   * disables the allowlist entirely for this user (reverts to
+   * unrestricted sharing) - it does NOT mean "allow nobody". Called from
+   * the admin API only.
+   */
+  async setShareAllowlist(ownerId: string, allowedUserIds: string[], createdBy: string): Promise<void> {
+    await this.db.transaction().execute(async (trx) => {
+      await trx.deleteFrom('user_share_allowlist').where('ownerId', '=', asUuid(ownerId)).execute();
+
+      if (allowedUserIds.length > 0) {
+        await trx
+          .insertInto('user_share_allowlist')
+          .values(
+            allowedUserIds.map((allowedUserId) => ({
+              ownerId: asUuid(ownerId),
+              allowedUserId: asUuid(allowedUserId),
+              createdBy: asUuid(createdBy),
+            })),
+          )
+          .execute();
+      }
+    });
+  }
 }

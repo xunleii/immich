@@ -3,7 +3,7 @@
   import UserAvatar from '$lib/components/shared-components/UserAvatar.svelte';
   import { handleAddUsersToAlbum } from '$lib/services/album.service';
   import { normalizeSearchString } from '$lib/utils/string-utils';
-  import { searchUsers, type AlbumResponseDto, type UserResponseDto } from '@immich/sdk';
+  import { getMyShareAllowlist, searchUsers, type AlbumResponseDto, type UserResponseDto } from '@immich/sdk';
   import { FormModal, ListButton, LoadingSpinner, Stack, Text } from '@immich/ui';
   import { sortBy } from 'lodash-es';
   import { onMount } from 'svelte';
@@ -50,7 +50,11 @@
   };
 
   onMount(async () => {
-    users = await searchUsers();
+    const [allUsers, { allowedUsers }] = await Promise.all([searchUsers(), getMyShareAllowlist()]);
+    // An active allowlist (non-empty) restricts the picker to those users only;
+    // an empty allowlist means unrestricted sharing, so show everyone.
+    const allowedIds = new Set(allowedUsers.map(({ id }) => id));
+    users = allowedIds.size > 0 ? allUsers.filter(({ id }) => allowedIds.has(id)) : allUsers;
     loading = false;
   });
 </script>

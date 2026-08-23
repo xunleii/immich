@@ -832,6 +832,14 @@ export type SessionResponseDto = {
     /** Last update date */
     updatedAt: string;
 };
+export type UserShareAllowlistResponseDto = {
+    /** Users this account is allowed to share with. An empty array means the allowlist is not active (unrestricted sharing), not that sharing is fully blocked. */
+    allowedUsers: UserResponseDto[];
+};
+export type UserShareAllowlistUpdateDto = {
+    /** IDs of the users this account is allowed to share albums/assets with. An empty array disables the allowlist for this account (reverts to unrestricted sharing) rather than allowing nobody. */
+    allowedUserIds: string[];
+};
 export type AssetStatsResponseDto = {
     /** Number of images */
     images: number;
@@ -4036,6 +4044,35 @@ export function getUserSessionsAdmin({ id }: {
     }>(`/admin/users/${encodeURIComponent(id)}/sessions`, {
         ...opts
     }));
+}
+/**
+ * Retrieve share allowlist
+ */
+export function getUserShareAllowlistAdmin({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: UserShareAllowlistResponseDto;
+    }>(`/admin/users/${encodeURIComponent(id)}/share-allowlist`, {
+        ...opts
+    }));
+}
+/**
+ * Update share allowlist
+ */
+export function updateUserShareAllowlistAdmin({ id, userShareAllowlistUpdateDto }: {
+    id: string;
+    userShareAllowlistUpdateDto: UserShareAllowlistUpdateDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: UserShareAllowlistResponseDto;
+    }>(`/admin/users/${encodeURIComponent(id)}/share-allowlist`, oazapfts.json({
+        ...opts,
+        method: "PUT",
+        body: userShareAllowlistUpdateDto
+    })));
 }
 /**
  * Retrieve user statistics
@@ -7346,6 +7383,17 @@ export function updateMyPreferences({ userPreferencesUpdateDto }: {
         method: "PUT",
         body: userPreferencesUpdateDto
     })));
+}
+/**
+ * Retrieve my share allowlist
+ */
+export function getMyShareAllowlist(opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: UserShareAllowlistResponseDto;
+    }>("/users/me/share-allowlist", {
+        ...opts
+    }));
 }
 /**
  * Delete user profile image

@@ -12,6 +12,8 @@ import {
   UserAdminResponseDto,
   UserAdminSearchDto,
   UserAdminUpdateDto,
+  UserShareAllowlistResponseDto,
+  UserShareAllowlistUpdateDto,
 } from 'src/dtos/user.dto';
 import { ApiTag, Permission } from 'src/enum';
 import { Auth, Authenticated } from 'src/middleware/auth.guard';
@@ -193,5 +195,38 @@ export class UserAdminController {
   })
   restoreUserAdmin(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<UserAdminResponseDto> {
     return this.service.restore(auth, id);
+  }
+
+  @Get(':id/share-allowlist')
+  @Authenticated({ permission: Permission.AdminUserRead, admin: true })
+  @Endpoint({
+    summary: 'Retrieve share allowlist',
+    description:
+      'Retrieve the list of users this account is allowed to share albums/assets with. An empty list means the ' +
+      'allowlist is not active for this account (sharing is unrestricted).',
+    history: new HistoryBuilder().added('v1').stable('v1'),
+  })
+  getUserShareAllowlistAdmin(
+    @Auth() auth: AuthDto,
+    @Param() { id }: UUIDParamDto,
+  ): Promise<UserShareAllowlistResponseDto> {
+    return this.service.getShareAllowlist(auth, id);
+  }
+
+  @Put(':id/share-allowlist')
+  @Authenticated({ permission: Permission.AdminUserUpdate, admin: true })
+  @Endpoint({
+    summary: 'Update share allowlist',
+    description:
+      'Replace the list of users this account is allowed to share albums/assets with. Pass an empty array to ' +
+      'disable the allowlist for this account (reverts to unrestricted sharing).',
+    history: new HistoryBuilder().added('v1').stable('v1'),
+  })
+  updateUserShareAllowlistAdmin(
+    @Auth() auth: AuthDto,
+    @Param() { id }: UUIDParamDto,
+    @Body() dto: UserShareAllowlistUpdateDto,
+  ): Promise<UserShareAllowlistResponseDto> {
+    return this.service.updateShareAllowlist(auth, id, dto);
   }
 }

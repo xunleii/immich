@@ -158,3 +158,29 @@ export function mapUserAdmin(entity: UserAdmin): UserAdminResponseDto {
     license: license ? { ...license, activatedAt: new Date(license.activatedAt) } : null,
   };
 }
+
+export const UserShareAllowlistUpdateSchema = z
+  .object({
+    allowedUserIds: z
+      .array(z.uuidv4())
+      .describe(
+        'IDs of the users this account is allowed to share albums/assets with. An empty array disables the ' +
+          'allowlist for this account (reverts to unrestricted sharing) rather than allowing nobody.',
+      ),
+  })
+  .meta({ id: 'UserShareAllowlistUpdateDto' });
+
+export class UserShareAllowlistUpdateDto extends createZodDto(UserShareAllowlistUpdateSchema) {}
+
+export const UserShareAllowlistResponseSchema = z
+  .object({
+    allowedUsers: z
+      .array(UserResponseSchema)
+      .describe(
+        'Users this account is allowed to share with. An empty array means the allowlist is not active ' +
+          '(unrestricted sharing), not that sharing is fully blocked.',
+      ),
+  })
+  .meta({ id: 'UserShareAllowlistResponseDto' });
+
+export class UserShareAllowlistResponseDto extends createZodDto(UserShareAllowlistResponseSchema) {}

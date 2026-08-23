@@ -18,6 +18,7 @@ describe(AlbumService.name, () => {
 
   beforeEach(() => {
     ({ sut, mocks } = newTestService(AlbumService));
+    mocks.user.getDisallowedTargets.mockResolvedValue([]);
   });
 
   it('should work', () => {
@@ -316,6 +317,23 @@ describe(AlbumService.name, () => {
       expect(mocks.album.create).not.toHaveBeenCalled();
     });
 
+    it('should throw an error if the admin has restricted sharing with an invited user', async () => {
+      const owner = UserFactory.create();
+      const restrictedUserId = newUuid();
+      mocks.user.get.mockResolvedValue(UserFactory.create({ id: restrictedUserId }));
+      mocks.user.getDisallowedTargets.mockResolvedValue([restrictedUserId]);
+
+      await expect(
+        sut.create(AuthFactory.create(owner), {
+          albumName: 'test',
+          albumUsers: [{ userId: restrictedUserId, role: AlbumUserRole.Editor }],
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(mocks.user.getDisallowedTargets).toHaveBeenCalledWith(owner.id, [restrictedUserId]);
+      expect(mocks.album.create).not.toHaveBeenCalled();
+    });
+
     it('should only add assets the user is allowed to access', async () => {
       const assetId = newUuid();
       const album = AlbumFactory.from()
@@ -470,6 +488,23 @@ describe(AlbumService.name, () => {
         sut.addUsers(AuthFactory.create(user), album.id, { albumUsers: [{ userId: newUuid() }] }),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(mocks.album.update).not.toHaveBeenCalled();
+    });
+
+    it('should throw an error if the admin has restricted sharing with the target user', async () => {
+      const album = AlbumFactory.create();
+      const { user: owner } = album.albumUsers.find(({ role }) => role === AlbumUserRole.Owner)!;
+      const restrictedUserId = newUuid();
+      mocks.access.album.checkOwnerAccess.mockResolvedValue(new Set([album.id]));
+      mocks.album.getById.mockResolvedValue(getForAlbum(album));
+      mocks.user.getDisallowedTargets.mockResolvedValue([restrictedUserId]);
+
+      await expect(
+        sut.addUsers(AuthFactory.create(owner), album.id, { albumUsers: [{ userId: restrictedUserId }] }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(mocks.user.getDisallowedTargets).toHaveBeenCalledWith(owner.id, [restrictedUserId]);
+      expect(mocks.albumUser.create).not.toHaveBeenCalled();
+      expect(mocks.event.emit).not.toHaveBeenCalled();
     });
 
     it('should skip if the userId is already added', async () => {

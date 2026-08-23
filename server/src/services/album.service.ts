@@ -109,6 +109,11 @@ export class AlbumService extends BaseService {
       }
     }
 
+    await this.requireShareAllowed(
+      auth.user.id,
+      albumUsers.map(({ userId }) => userId),
+    );
+
     const allowedAssetIdsSet = await this.checkAccess({
       auth,
       permission: Permission.AssetShare,
@@ -289,6 +294,11 @@ export class AlbumService extends BaseService {
 
     const album = await this.findOrFail(id, auth.user.id, { withAssets: false });
 
+    await this.requireShareAllowed(
+      auth.user.id,
+      albumUsers.map(({ userId }) => userId),
+    );
+
     for (const { userId, role } of albumUsers) {
       if (role === AlbumUserRole.Owner) {
         throw new BadRequestException('Cannot add another owner');
@@ -354,5 +364,23 @@ export class AlbumService extends BaseService {
 
   private findOrFail(id: string, authUserId: string, options: AlbumInfoOptions) {
     return findOrFail(() => this.albumRepository.getById(id, options, authUserId), 'Album');
+  }
+
+  /**
+   * Throws if `ownerId` has an active share allowlist that doesn't
+   * include one or more of `targetIds`. No-op when `targetIds` is empty,
+   * or when the owner has no allowlist configured (default: unrestricted).
+   * See the `user_share_allowlist` table / admin API for how the
+   * allowlist is set.
+   */
+  private async requireShareAllowed(ownerId: string, targetIds: string[]): Promise<void> {
+    if (targetIds.length === 0) {
+      return;
+    }
+
+    const disallowed = await this.userRepository.getDisallowedTargets(ownerId, targetIds);
+    if (disallowed.length > 0) {
+      throw new BadRequestException('You are not allowed to share with one or more of these users');
+    }
   }
 }

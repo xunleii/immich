@@ -24,7 +24,12 @@ import { LicenseKeyDto, LicenseResponseDto } from 'src/dtos/license.dto';
 import { OnboardingDto, OnboardingResponseDto } from 'src/dtos/onboarding.dto';
 import { UserPreferencesResponseDto, UserPreferencesUpdateDto } from 'src/dtos/user-preferences.dto';
 import { CreateProfileImageDto, CreateProfileImageResponseDto } from 'src/dtos/user-profile.dto';
-import { UserAdminResponseDto, UserResponseDto, UserUpdateMeDto } from 'src/dtos/user.dto';
+import {
+  UserAdminResponseDto,
+  UserResponseDto,
+  UserShareAllowlistResponseDto,
+  UserUpdateMeDto,
+} from 'src/dtos/user.dto';
 import { ApiTag, Permission, RouteKey } from 'src/enum';
 import { Auth, Authenticated, FileResponse } from 'src/middleware/auth.guard';
 import { FileUploadInterceptor } from 'src/middleware/file-upload.interceptor';
@@ -72,6 +77,19 @@ export class UserController {
   })
   getMyCalendarHeatmap(@Auth() auth: AuthDto, @Query() dto: CalendarHeatmapDto): Promise<CalendarHeatmapResponseDto> {
     return this.service.getCalendarHeatmap(auth, dto);
+  }
+
+  @Get('me/share-allowlist')
+  @Authenticated({ permission: Permission.UserRead })
+  @Endpoint({
+    summary: 'Retrieve my share allowlist',
+    description:
+      'Retrieve the list of users the current account is allowed to share albums/assets with. An empty list means ' +
+      'the allowlist is not active (sharing is unrestricted).',
+    history: new HistoryBuilder().added('v1').stable('v1'),
+  })
+  getMyShareAllowlist(@Auth() auth: AuthDto): Promise<UserShareAllowlistResponseDto> {
+    return this.service.getMyShareAllowlist(auth);
   }
 
   @Put('me')
