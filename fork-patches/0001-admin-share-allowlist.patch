@@ -1,0 +1,981 @@
+From dfd11d47fea3ba7ad673582e8224724da312bc34 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Sun, 23 Aug 2026 00:54:47 +0000
+Subject: [PATCH] feat: admin-managed share allowlist (server + web)
+
+Lets an admin opt a user into a share allowlist: once at least one
+entry exists for that account, they may ONLY share albums/assets with
+the users on the list. Accounts with no entries are unrestricted
+(stock Immich behavior, unchanged).
+
+- new table user_share_allowlist (ownerId, allowedUserId)
+- checks wired into AlbumService.create / addUsers
+- admin API: GET/PUT /admin/users/:id/share-allowlist
+- web UI: new card on /admin/users/:id with add/remove modal
+- OpenAPI spec + @immich/sdk regenerated
+
+Based on immich-app/immich@b26b0cc
+---
+ i18n/en.json                                  |   8 +
+ open-api/immich-openapi-specs.json            | 156 ++++++++++++++++++
+ packages/sdk/src/fetch-client.ts              |  37 +++++
+ .../src/controllers/user-admin.controller.ts  |  35 ++++
+ server/src/dtos/user.dto.ts                   |  26 +++
+ server/src/repositories/user.repository.ts    |  92 +++++++++++
+ server/src/schema/index.ts                    |   3 +
+ .../1787200000000-AddUserShareAllowlist.ts    |  20 +++
+ .../tables/user-share-allowlist.table.ts      |  33 ++++
+ server/src/services/album.service.spec.ts     |  35 ++++
+ server/src/services/album.service.ts          |  28 ++++
+ server/src/services/user-admin.service.ts     |  30 ++++
+ .../lib/modals/ShareAllowlistAddModal.svelte  |  62 +++++++
+ .../routes/admin/users/[id]/+layout.svelte    |  78 ++++++++-
+ web/src/routes/admin/users/[id]/+layout.ts    |  12 +-
+ 15 files changed, 651 insertions(+), 4 deletions(-)
+ create mode 100644 server/src/schema/migrations/1787200000000-AddUserShareAllowlist.ts
+ create mode 100644 server/src/schema/tables/user-share-allowlist.table.ts
+ create mode 100644 web/src/lib/modals/ShareAllowlistAddModal.svelte
+
+diff --git a/i18n/en.json b/i18n/en.json
+index 1a9d2fa..8003dc9 100644
+--- a/i18n/en.json
++++ b/i18n/en.json
+@@ -42,6 +42,7 @@
+   "added_to_favorites": "Added to favorites",
+   "added_to_favorites_count": "Added {count, number} to favorites",
+   "admin": {
++    "add_allowed_share_user": "Allow sharing with",
+     "add_exclusion_pattern_description": "Add exclusion patterns. Globbing using *, **, and ? is supported. To ignore all files in any directory named \"Raw\", use \"**/Raw/**\". To ignore all files ending in \".tif\", use \"**/*.tif\". To ignore an absolute path, use \"/path/to/ignore/**\".",
+     "admin_user": "Admin User",
+     "asset_offline_description": "This external library asset is no longer found on disk and has been moved to trash. If the file was moved within the library, check your timeline for the new corresponding asset. To restore this asset, please ensure that the file path below can be accessed by Immich and scan the library.",
+@@ -355,6 +356,12 @@
+     "server_welcome_message": "Welcome message",
+     "server_welcome_message_description": "A message that is displayed on the login page.",
+     "settings_page_description": "Admin settings page",
++    "share_allowlist": "Share Allowlist",
++    "share_allowlist_add_description": "Select the users this account should be allowed to share albums or assets with.",
++    "share_allowlist_description": "When active, this user can ONLY share albums or assets with the users listed below. Remove all users to disable the allowlist and allow sharing with anyone again.",
++    "share_allowlist_no_more_users": "There are no more users to add.",
++    "share_allowlist_not_active": "Not active - this user can share with anyone.",
++    "share_allowlist_updated": "Share allowlist updated",
+     "sidecar_job": "Sidecar metadata",
+     "sidecar_job_description": "Discover or synchronize sidecar metadata from the filesystem",
+     "slideshow_duration_description": "Number of seconds to display each image",
+@@ -1097,6 +1104,7 @@
+     "unable_to_update_library": "Unable to update library",
+     "unable_to_update_location": "Unable to update location",
+     "unable_to_update_settings": "Unable to update settings",
++    "unable_to_update_share_allowlist": "Unable to update share allowlist",
+     "unable_to_update_timeline_display_status": "Unable to update timeline display status",
+     "unable_to_update_user": "Unable to update user",
+     "unable_to_update_workflow": "Unable to update workflow",
+diff --git a/open-api/immich-openapi-specs.json b/open-api/immich-openapi-specs.json
+index 66a430a..618e6e0 100644
+--- a/open-api/immich-openapi-specs.json
++++ b/open-api/immich-openapi-specs.json
+@@ -2069,6 +2069,130 @@
+         "x-immich-state": "Stable"
+       }
+     },
++    "/admin/users/{id}/share-allowlist": {
++      "get": {
++        "description": "Retrieve the list of users this account is allowed to share albums/assets with. An empty list means the allowlist is not active for this account (sharing is unrestricted).",
++        "operationId": "getUserShareAllowlistAdmin",
++        "parameters": [
++          {
++            "name": "id",
++            "required": true,
++            "in": "path",
++            "schema": {
++              "format": "uuid",
++              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
++              "type": "string"
++            }
++          }
++        ],
++        "responses": {
++          "200": {
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/UserShareAllowlistResponseDto"
++                }
++              }
++            },
++            "description": ""
++          }
++        },
++        "security": [
++          {
++            "bearer": []
++          },
++          {
++            "cookie": []
++          },
++          {
++            "api_key": []
++          }
++        ],
++        "summary": "Retrieve share allowlist",
++        "tags": [
++          "Users (admin)"
++        ],
++        "x-immich-admin-only": true,
++        "x-immich-history": [
++          {
++            "version": "v1",
++            "state": "Added"
++          },
++          {
++            "version": "v1",
++            "state": "Stable"
++          }
++        ],
++        "x-immich-permission": "adminUser.read",
++        "x-immich-state": "Stable"
++      },
++      "put": {
++        "description": "Replace the list of users this account is allowed to share albums/assets with. Pass an empty array to disable the allowlist for this account (reverts to unrestricted sharing).",
++        "operationId": "updateUserShareAllowlistAdmin",
++        "parameters": [
++          {
++            "name": "id",
++            "required": true,
++            "in": "path",
++            "schema": {
++              "format": "uuid",
++              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
++              "type": "string"
++            }
++          }
++        ],
++        "requestBody": {
++          "content": {
++            "application/json": {
++              "schema": {
++                "$ref": "#/components/schemas/UserShareAllowlistUpdateDto"
++              }
++            }
++          },
++          "required": true
++        },
++        "responses": {
++          "200": {
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/UserShareAllowlistResponseDto"
++                }
++              }
++            },
++            "description": ""
++          }
++        },
++        "security": [
++          {
++            "bearer": []
++          },
++          {
++            "cookie": []
++          },
++          {
++            "api_key": []
++          }
++        ],
++        "summary": "Update share allowlist",
++        "tags": [
++          "Users (admin)"
++        ],
++        "x-immich-admin-only": true,
++        "x-immich-history": [
++          {
++            "version": "v1",
++            "state": "Added"
++          },
++          {
++            "version": "v1",
++            "state": "Stable"
++          }
++        ],
++        "x-immich-permission": "adminUser.update",
++        "x-immich-state": "Stable"
++      }
++    },
+     "/admin/users/{id}/statistics": {
+       "get": {
+         "description": "Retrieve asset statistics for a specific user.",
+@@ -29525,6 +29649,38 @@
+         ],
+         "type": "object"
+       },
++      "UserShareAllowlistResponseDto": {
++        "properties": {
++          "allowedUsers": {
++            "description": "Users this account is allowed to share with. An empty array means the allowlist is not active (unrestricted sharing), not that sharing is fully blocked.",
++            "items": {
++              "$ref": "#/components/schemas/UserResponseDto"
++            },
++            "type": "array"
++          }
++        },
++        "required": [
++          "allowedUsers"
++        ],
++        "type": "object"
++      },
++      "UserShareAllowlistUpdateDto": {
++        "properties": {
++          "allowedUserIds": {
++            "description": "IDs of the users this account is allowed to share albums/assets with. An empty array disables the allowlist for this account (reverts to unrestricted sharing) rather than allowing nobody.",
++            "items": {
++              "format": "uuid",
++              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
++              "type": "string"
++            },
++            "type": "array"
++          }
++        },
++        "required": [
++          "allowedUserIds"
++        ],
++        "type": "object"
++      },
+       "UserStatus": {
+         "description": "User status",
+         "enum": [
+diff --git a/packages/sdk/src/fetch-client.ts b/packages/sdk/src/fetch-client.ts
+index 98444f4..6c6ce35 100644
+--- a/packages/sdk/src/fetch-client.ts
++++ b/packages/sdk/src/fetch-client.ts
+@@ -832,6 +832,14 @@ export type SessionResponseDto = {
+     /** Last update date */
+     updatedAt: string;
+ };
++export type UserShareAllowlistResponseDto = {
++    /** Users this account is allowed to share with. An empty array means the allowlist is not active (unrestricted sharing), not that sharing is fully blocked. */
++    allowedUsers: UserResponseDto[];
++};
++export type UserShareAllowlistUpdateDto = {
++    /** IDs of the users this account is allowed to share albums/assets with. An empty array disables the allowlist for this account (reverts to unrestricted sharing) rather than allowing nobody. */
++    allowedUserIds: string[];
++};
+ export type AssetStatsResponseDto = {
+     /** Number of images */
+     images: number;
+@@ -4037,6 +4045,35 @@ export function getUserSessionsAdmin({ id }: {
+         ...opts
+     }));
+ }
++/**
++ * Retrieve share allowlist
++ */
++export function getUserShareAllowlistAdmin({ id }: {
++    id: string;
++}, opts?: Oazapfts.RequestOpts) {
++    return oazapfts.ok(oazapfts.fetchJson<{
++        status: 200;
++        data: UserShareAllowlistResponseDto;
++    }>(`/admin/users/${encodeURIComponent(id)}/share-allowlist`, {
++        ...opts
++    }));
++}
++/**
++ * Update share allowlist
++ */
++export function updateUserShareAllowlistAdmin({ id, userShareAllowlistUpdateDto }: {
++    id: string;
++    userShareAllowlistUpdateDto: UserShareAllowlistUpdateDto;
++}, opts?: Oazapfts.RequestOpts) {
++    return oazapfts.ok(oazapfts.fetchJson<{
++        status: 200;
++        data: UserShareAllowlistResponseDto;
++    }>(`/admin/users/${encodeURIComponent(id)}/share-allowlist`, oazapfts.json({
++        ...opts,
++        method: "PUT",
++        body: userShareAllowlistUpdateDto
++    })));
++}
+ /**
+  * Retrieve user statistics
+  */
+diff --git a/server/src/controllers/user-admin.controller.ts b/server/src/controllers/user-admin.controller.ts
+index 18798c0..40d4309 100644
+--- a/server/src/controllers/user-admin.controller.ts
++++ b/server/src/controllers/user-admin.controller.ts
+@@ -12,6 +12,8 @@ import {
+   UserAdminResponseDto,
+   UserAdminSearchDto,
+   UserAdminUpdateDto,
++  UserShareAllowlistResponseDto,
++  UserShareAllowlistUpdateDto,
+ } from 'src/dtos/user.dto';
+ import { ApiTag, Permission } from 'src/enum';
+ import { Auth, Authenticated } from 'src/middleware/auth.guard';
+@@ -194,4 +196,37 @@ export class UserAdminController {
+   restoreUserAdmin(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<UserAdminResponseDto> {
+     return this.service.restore(auth, id);
+   }
++
++  @Get(':id/share-allowlist')
++  @Authenticated({ permission: Permission.AdminUserRead, admin: true })
++  @Endpoint({
++    summary: 'Retrieve share allowlist',
++    description:
++      'Retrieve the list of users this account is allowed to share albums/assets with. An empty list means the ' +
++      'allowlist is not active for this account (sharing is unrestricted).',
++    history: new HistoryBuilder().added('v1').stable('v1'),
++  })
++  getUserShareAllowlistAdmin(
++    @Auth() auth: AuthDto,
++    @Param() { id }: UUIDParamDto,
++  ): Promise<UserShareAllowlistResponseDto> {
++    return this.service.getShareAllowlist(auth, id);
++  }
++
++  @Put(':id/share-allowlist')
++  @Authenticated({ permission: Permission.AdminUserUpdate, admin: true })
++  @Endpoint({
++    summary: 'Update share allowlist',
++    description:
++      'Replace the list of users this account is allowed to share albums/assets with. Pass an empty array to ' +
++      'disable the allowlist for this account (reverts to unrestricted sharing).',
++    history: new HistoryBuilder().added('v1').stable('v1'),
++  })
++  updateUserShareAllowlistAdmin(
++    @Auth() auth: AuthDto,
++    @Param() { id }: UUIDParamDto,
++    @Body() dto: UserShareAllowlistUpdateDto,
++  ): Promise<UserShareAllowlistResponseDto> {
++    return this.service.updateShareAllowlist(auth, id, dto);
++  }
+ }
+diff --git a/server/src/dtos/user.dto.ts b/server/src/dtos/user.dto.ts
+index 2a15e43..bfdc5b2 100644
+--- a/server/src/dtos/user.dto.ts
++++ b/server/src/dtos/user.dto.ts
+@@ -158,3 +158,29 @@ export function mapUserAdmin(entity: UserAdmin): UserAdminResponseDto {
+     license: license ? { ...license, activatedAt: new Date(license.activatedAt) } : null,
+   };
+ }
++
++export const UserShareAllowlistUpdateSchema = z
++  .object({
++    allowedUserIds: z
++      .array(z.uuidv4())
++      .describe(
++        'IDs of the users this account is allowed to share albums/assets with. An empty array disables the ' +
++          'allowlist for this account (reverts to unrestricted sharing) rather than allowing nobody.',
++      ),
++  })
++  .meta({ id: 'UserShareAllowlistUpdateDto' });
++
++export class UserShareAllowlistUpdateDto extends createZodDto(UserShareAllowlistUpdateSchema) {}
++
++export const UserShareAllowlistResponseSchema = z
++  .object({
++    allowedUsers: z
++      .array(UserResponseSchema)
++      .describe(
++        'Users this account is allowed to share with. An empty array means the allowlist is not active ' +
++          '(unrestricted sharing), not that sharing is fully blocked.',
++      ),
++  })
++  .meta({ id: 'UserShareAllowlistResponseDto' });
++
++export class UserShareAllowlistResponseDto extends createZodDto(UserShareAllowlistResponseSchema) {}
+diff --git a/server/src/repositories/user.repository.ts b/server/src/repositories/user.repository.ts
+index afe14fb..c3505b2 100644
+--- a/server/src/repositories/user.repository.ts
++++ b/server/src/repositories/user.repository.ts
+@@ -325,4 +325,96 @@ export class UserRepository {
+ 
+     await query.execute();
+   }
++
++  // --- user share allowlist (admin-managed, opt-in per user) ---
++
++  /**
++   * Returns true when `ownerId` is allowed to share with `targetId`.
++   *
++   * If `ownerId` has no rows in `user_share_allowlist`, the allowlist is
++   * not active for them and sharing is unrestricted (default behavior).
++   * As soon as they have at least one row, they may ONLY share with the
++   * users in that list.
++   */
++  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID] })
++  async isShareAllowed(ownerId: string, targetId: string): Promise<boolean> {
++    if (ownerId === targetId) {
++      return true;
++    }
++
++    const allowlist = await this.db
++      .selectFrom('user_share_allowlist')
++      .select('allowedUserId')
++      .where('ownerId', '=', asUuid(ownerId))
++      .execute();
++
++    if (allowlist.length === 0) {
++      // allowlist not enabled for this user => unrestricted
++      return true;
++    }
++
++    return allowlist.some((row) => row.allowedUserId === targetId);
++  }
++
++  /**
++   * Filters `targetIds` down to the ones `ownerId` is NOT allowed to share
++   * with, given their allowlist (if any). Empty array means every target
++   * is allowed (either the allowlist is inactive, or all targets are on it).
++   */
++  @GenerateSql({ params: [DummyValue.UUID, [DummyValue.UUID]] })
++  async getDisallowedTargets(ownerId: string, targetIds: string[]): Promise<string[]> {
++    if (targetIds.length === 0) {
++      return [];
++    }
++
++    const allowlist = await this.db
++      .selectFrom('user_share_allowlist')
++      .select('allowedUserId')
++      .where('ownerId', '=', asUuid(ownerId))
++      .execute();
++
++    if (allowlist.length === 0) {
++      // allowlist not enabled for this user => everything is allowed
++      return [];
++    }
++
++    const allowed = new Set(allowlist.map((row) => row.allowedUserId));
++    return targetIds.filter((id) => !allowed.has(id));
++  }
++
++  @GenerateSql({ params: [DummyValue.UUID] })
++  async getShareAllowlist(ownerId: string) {
++    return this.db
++      .selectFrom('user_share_allowlist')
++      .innerJoin('user', 'user.id', 'user_share_allowlist.allowedUserId')
++      .select(['user_share_allowlist.allowedUserId', 'user_share_allowlist.createdAt', ...columns.user])
++      .where('user_share_allowlist.ownerId', '=', asUuid(ownerId))
++      .where('user.deletedAt', 'is', null)
++      .execute();
++  }
++
++  /**
++   * Replaces the full allowlist for `ownerId`. Passing an empty array
++   * disables the allowlist entirely for this user (reverts to
++   * unrestricted sharing) - it does NOT mean "allow nobody". Called from
++   * the admin API only.
++   */
++  async setShareAllowlist(ownerId: string, allowedUserIds: string[], createdBy: string): Promise<void> {
++    await this.db.transaction().execute(async (trx) => {
++      await trx.deleteFrom('user_share_allowlist').where('ownerId', '=', asUuid(ownerId)).execute();
++
++      if (allowedUserIds.length > 0) {
++        await trx
++          .insertInto('user_share_allowlist')
++          .values(
++            allowedUserIds.map((allowedUserId) => ({
++              ownerId: asUuid(ownerId),
++              allowedUserId: asUuid(allowedUserId),
++              createdBy: asUuid(createdBy),
++            })),
++          )
++          .execute();
++      }
++    });
++  }
+ }
+diff --git a/server/src/schema/index.ts b/server/src/schema/index.ts
+index 61dc5d8..fb30a56 100644
+--- a/server/src/schema/index.ts
++++ b/server/src/schema/index.ts
+@@ -85,6 +85,7 @@ import { TagTable } from 'src/schema/tables/tag.table';
+ import { UserAuditTable } from 'src/schema/tables/user-audit.table';
+ import { UserMetadataAuditTable } from 'src/schema/tables/user-metadata-audit.table';
+ import { UserMetadataTable } from 'src/schema/tables/user-metadata.table';
++import { UserShareAllowlistTable } from 'src/schema/tables/user-share-allowlist.table';
+ import { UserTable } from 'src/schema/tables/user.table';
+ import { VersionHistoryTable } from 'src/schema/tables/version-history.table';
+ import {
+@@ -155,6 +156,7 @@ export class ImmichDatabase {
+     UserAuditTable,
+     UserMetadataTable,
+     UserMetadataAuditTable,
++    UserShareAllowlistTable,
+     UserTable,
+     VersionHistoryTable,
+     VideoStreamSessionTable,
+@@ -283,6 +285,7 @@ export interface DB {
+   user_audit: UserAuditTable;
+   user_metadata: UserMetadataTable;
+   user_metadata_audit: UserMetadataAuditTable;
++  user_share_allowlist: UserShareAllowlistTable;
+ 
+   version_history: VersionHistoryTable;
+ 
+diff --git a/server/src/schema/migrations/1787200000000-AddUserShareAllowlist.ts b/server/src/schema/migrations/1787200000000-AddUserShareAllowlist.ts
+new file mode 100644
+index 0000000..f91710c
+--- /dev/null
++++ b/server/src/schema/migrations/1787200000000-AddUserShareAllowlist.ts
+@@ -0,0 +1,20 @@
++import { Kysely, sql } from 'kysely';
++
++export async function up(db: Kysely<any>): Promise<void> {
++  await sql`CREATE TABLE "user_share_allowlist" (
++  "ownerId" uuid NOT NULL,
++  "allowedUserId" uuid NOT NULL,
++  "createdAt" timestamp with time zone NOT NULL DEFAULT now(),
++  "createdBy" uuid NOT NULL,
++  CONSTRAINT "user_share_allowlist_pkey" PRIMARY KEY ("ownerId", "allowedUserId"),
++  CONSTRAINT "user_share_allowlist_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "user" ("id") ON UPDATE NO ACTION ON DELETE CASCADE,
++  CONSTRAINT "user_share_allowlist_allowedUserId_fkey" FOREIGN KEY ("allowedUserId") REFERENCES "user" ("id") ON UPDATE NO ACTION ON DELETE CASCADE
++);`.execute(db);
++  await sql`CREATE INDEX "user_share_allowlist_allowedUserId_idx" ON "user_share_allowlist" ("allowedUserId");`.execute(
++    db,
++  );
++}
++
++export async function down(db: Kysely<any>): Promise<void> {
++  await sql`DROP TABLE "user_share_allowlist";`.execute(db);
++}
+diff --git a/server/src/schema/tables/user-share-allowlist.table.ts b/server/src/schema/tables/user-share-allowlist.table.ts
+new file mode 100644
+index 0000000..c720922
+--- /dev/null
++++ b/server/src/schema/tables/user-share-allowlist.table.ts
+@@ -0,0 +1,33 @@
++import { Column, CreateDateColumn, ForeignKeyColumn, Generated, Table, Timestamp } from '@immich/sql-tools';
++import { UserTable } from 'src/schema/tables/user.table';
++
++/**
++ * Per-owner share allowlist, activated on demand:
++ *
++ * - No rows for `ownerId` => sharing is unrestricted (default behavior,
++ *   unchanged from stock Immich).
++ * - One or more rows for `ownerId` => `ownerId` may ONLY share
++ *   albums/assets with the users listed here. Everyone else is denied.
++ *
++ * Removing the last row for a user turns the restriction back off
++ * (reverts to unrestricted), it does not mean "allow nobody".
++ */
++@Table('user_share_allowlist')
++export class UserShareAllowlistTable {
++  @ForeignKeyColumn(() => UserTable, {
++    onDelete: 'CASCADE',
++    primary: true,
++    // [ownerId, allowedUserId] is the PK constraint
++    index: false,
++  })
++  ownerId!: string;
++
++  @ForeignKeyColumn(() => UserTable, { onDelete: 'CASCADE', primary: true })
++  allowedUserId!: string;
++
++  @CreateDateColumn()
++  createdAt!: Generated<Timestamp>;
++
++  @Column({ type: 'uuid' })
++  createdBy!: string;
++}
+diff --git a/server/src/services/album.service.spec.ts b/server/src/services/album.service.spec.ts
+index a97407b..33554f1 100644
+--- a/server/src/services/album.service.spec.ts
++++ b/server/src/services/album.service.spec.ts
+@@ -18,6 +18,7 @@ describe(AlbumService.name, () => {
+ 
+   beforeEach(() => {
+     ({ sut, mocks } = newTestService(AlbumService));
++    mocks.user.getDisallowedTargets.mockResolvedValue([]);
+   });
+ 
+   it('should work', () => {
+@@ -316,6 +317,23 @@ describe(AlbumService.name, () => {
+       expect(mocks.album.create).not.toHaveBeenCalled();
+     });
+ 
++    it('should throw an error if the admin has restricted sharing with an invited user', async () => {
++      const owner = UserFactory.create();
++      const restrictedUserId = newUuid();
++      mocks.user.get.mockResolvedValue(UserFactory.create({ id: restrictedUserId }));
++      mocks.user.getDisallowedTargets.mockResolvedValue([restrictedUserId]);
++
++      await expect(
++        sut.create(AuthFactory.create(owner), {
++          albumName: 'test',
++          albumUsers: [{ userId: restrictedUserId, role: AlbumUserRole.Editor }],
++        }),
++      ).rejects.toBeInstanceOf(BadRequestException);
++
++      expect(mocks.user.getDisallowedTargets).toHaveBeenCalledWith(owner.id, [restrictedUserId]);
++      expect(mocks.album.create).not.toHaveBeenCalled();
++    });
++
+     it('should only add assets the user is allowed to access', async () => {
+       const assetId = newUuid();
+       const album = AlbumFactory.from()
+@@ -472,6 +490,23 @@ describe(AlbumService.name, () => {
+       expect(mocks.album.update).not.toHaveBeenCalled();
+     });
+ 
++    it('should throw an error if the admin has restricted sharing with the target user', async () => {
++      const album = AlbumFactory.create();
++      const { user: owner } = album.albumUsers.find(({ role }) => role === AlbumUserRole.Owner)!;
++      const restrictedUserId = newUuid();
++      mocks.access.album.checkOwnerAccess.mockResolvedValue(new Set([album.id]));
++      mocks.album.getById.mockResolvedValue(getForAlbum(album));
++      mocks.user.getDisallowedTargets.mockResolvedValue([restrictedUserId]);
++
++      await expect(
++        sut.addUsers(AuthFactory.create(owner), album.id, { albumUsers: [{ userId: restrictedUserId }] }),
++      ).rejects.toBeInstanceOf(BadRequestException);
++
++      expect(mocks.user.getDisallowedTargets).toHaveBeenCalledWith(owner.id, [restrictedUserId]);
++      expect(mocks.albumUser.create).not.toHaveBeenCalled();
++      expect(mocks.event.emit).not.toHaveBeenCalled();
++    });
++
+     it('should skip if the userId is already added', async () => {
+       const userId = newUuid();
+       const album = AlbumFactory.from().albumUser({ userId }).build();
+diff --git a/server/src/services/album.service.ts b/server/src/services/album.service.ts
+index a94049b..602f508 100644
+--- a/server/src/services/album.service.ts
++++ b/server/src/services/album.service.ts
+@@ -109,6 +109,11 @@ export class AlbumService extends BaseService {
+       }
+     }
+ 
++    await this.requireShareAllowed(
++      auth.user.id,
++      albumUsers.map(({ userId }) => userId),
++    );
++
+     const allowedAssetIdsSet = await this.checkAccess({
+       auth,
+       permission: Permission.AssetShare,
+@@ -289,6 +294,11 @@ export class AlbumService extends BaseService {
+ 
+     const album = await this.findOrFail(id, auth.user.id, { withAssets: false });
+ 
++    await this.requireShareAllowed(
++      auth.user.id,
++      albumUsers.map(({ userId }) => userId),
++    );
++
+     for (const { userId, role } of albumUsers) {
+       if (role === AlbumUserRole.Owner) {
+         throw new BadRequestException('Cannot add another owner');
+@@ -355,4 +365,22 @@ export class AlbumService extends BaseService {
+   private findOrFail(id: string, authUserId: string, options: AlbumInfoOptions) {
+     return findOrFail(() => this.albumRepository.getById(id, options, authUserId), 'Album');
+   }
++
++  /**
++   * Throws if `ownerId` has an active share allowlist that doesn't
++   * include one or more of `targetIds`. No-op when `targetIds` is empty,
++   * or when the owner has no allowlist configured (default: unrestricted).
++   * See the `user_share_allowlist` table / admin API for how the
++   * allowlist is set.
++   */
++  private async requireShareAllowed(ownerId: string, targetIds: string[]): Promise<void> {
++    if (targetIds.length === 0) {
++      return;
++    }
++
++    const disallowed = await this.userRepository.getDisallowedTargets(ownerId, targetIds);
++    if (disallowed.length > 0) {
++      throw new BadRequestException('You are not allowed to share with one or more of these users');
++    }
++  }
+ }
+diff --git a/server/src/services/user-admin.service.ts b/server/src/services/user-admin.service.ts
+index f80a810..d5d53b6 100644
+--- a/server/src/services/user-admin.service.ts
++++ b/server/src/services/user-admin.service.ts
+@@ -11,6 +11,9 @@ import {
+   UserAdminResponseDto,
+   UserAdminSearchDto,
+   UserAdminUpdateDto,
++  UserShareAllowlistResponseDto,
++  UserShareAllowlistUpdateDto,
++  mapUser,
+   mapUserAdmin,
+ } from 'src/dtos/user.dto';
+ import { JobName, UserMetadataKey, UserStatus } from 'src/enum';
+@@ -159,6 +162,33 @@ export class UserAdminService extends BaseService {
+     return mapPreferences(newPreferences);
+   }
+ 
++  async getShareAllowlist(auth: AuthDto, id: string): Promise<UserShareAllowlistResponseDto> {
++    await this.findOrFail(id, {});
++    const allowlist = await this.userRepository.getShareAllowlist(id);
++    return { allowedUsers: allowlist.map((user) => mapUser(user)) };
++  }
++
++  async updateShareAllowlist(
++    auth: AuthDto,
++    id: string,
++    { allowedUserIds }: UserShareAllowlistUpdateDto,
++  ): Promise<UserShareAllowlistResponseDto> {
++    await this.findOrFail(id, {});
++
++    const uniqueIds = [...new Set(allowedUserIds)].filter((allowedId) => allowedId !== id);
++    for (const allowedId of uniqueIds) {
++      const exists = await this.userRepository.get(allowedId, {});
++      if (!exists) {
++        throw new BadRequestException(`Invalid user id: ${allowedId}`);
++      }
++    }
++
++    await this.userRepository.setShareAllowlist(id, uniqueIds, auth.user.id);
++
++    const allowlist = await this.userRepository.getShareAllowlist(id);
++    return { allowedUsers: allowlist.map((user) => mapUser(user)) };
++  }
++
+   private findOrFail(id: string, options: UserFindOptions) {
+     return findOrFail(() => this.userRepository.get(id, options), 'User');
+   }
+diff --git a/web/src/lib/modals/ShareAllowlistAddModal.svelte b/web/src/lib/modals/ShareAllowlistAddModal.svelte
+new file mode 100644
+index 0000000..a533a44
+--- /dev/null
++++ b/web/src/lib/modals/ShareAllowlistAddModal.svelte
+@@ -0,0 +1,62 @@
++<script lang="ts">
++  import UserAvatar from '$lib/components/shared-components/UserAvatar.svelte';
++  import { searchUsersAdmin, type UserResponseDto } from '@immich/sdk';
++  import { Button, ListButton, LoadingSpinner, Modal, ModalBody, ModalFooter, Text } from '@immich/ui';
++  import { t } from 'svelte-i18n';
++
++  type Props = {
++    /** the user being configured, and any users already on their allowlist */
++    excludedUserIds: string[];
++    onClose: (users?: UserResponseDto[]) => void;
++  };
++
++  let { excludedUserIds, onClose }: Props = $props();
++
++  let availableUsers: UserResponseDto[] = $state([]);
++  let selectedUsers: UserResponseDto[] = $state([]);
++
++  const loadUsers = async () => {
++    const users = await searchUsersAdmin({});
++    const excluded = new Set(excludedUserIds);
++    availableUsers = users.filter(({ id }) => !excluded.has(id));
++  };
++
++  const selectUser = (user: UserResponseDto) => {
++    selectedUsers = selectedUsers.some(({ id }) => id === user.id)
++      ? selectedUsers.filter((selectedUser) => selectedUser.id !== user.id)
++      : [...selectedUsers, user];
++  };
++</script>
++
++<Modal title={$t('admin.add_allowed_share_user')} {onClose} size="small">
++  <ModalBody>
++    {#await loadUsers()}
++      <div class="flex w-full place-content-center place-items-center">
++        <LoadingSpinner />
++      </div>
++    {:then _}
++      {#if availableUsers.length > 0}
++        <Text size="tiny" color="muted" class="mb-2">{$t('admin.share_allowlist_add_description')}</Text>
++        <div class="flex max-h-75 immich-scrollbar flex-col gap-2 overflow-y-auto">
++          {#each availableUsers as user (user.id)}
++            <ListButton onclick={() => selectUser(user)} selected={selectedUsers.some(({ id }) => id === user.id)}>
++              <UserAvatar {user} size="md" />
++              <div class="grow text-start">
++                <Text fontWeight="medium">{user.name}</Text>
++                <Text size="tiny" color="muted">{user.email}</Text>
++              </div>
++            </ListButton>
++          {/each}
++        </div>
++
++        <ModalFooter>
++          <Button shape="round" fullWidth onclick={() => onClose(selectedUsers)} disabled={selectedUsers.length === 0}>
++            {$t('add')}
++          </Button>
++        </ModalFooter>
++      {:else}
++        <Text color="muted">{$t('admin.share_allowlist_no_more_users')}</Text>
++      {/if}
++    {/await}
++  </ModalBody>
++</Modal>
+diff --git a/web/src/routes/admin/users/[id]/+layout.svelte b/web/src/routes/admin/users/[id]/+layout.svelte
+index dc49e5f..f357ee9 100644
+--- a/web/src/routes/admin/users/[id]/+layout.svelte
++++ b/web/src/routes/admin/users/[id]/+layout.svelte
+@@ -7,12 +7,20 @@
+   import UserAvatar from '$lib/components/shared-components/UserAvatar.svelte';
+   import DeviceCard from '$lib/components/user-settings-page/DeviceCard.svelte';
+   import FeatureSetting from './FeatureSetting.svelte';
++  import ShareAllowlistAddModal from '$lib/modals/ShareAllowlistAddModal.svelte';
+   import { Route } from '$lib/route';
+   import { getUserAdminActions } from '$lib/services/user-admin.service';
+   import { locale } from '$lib/stores/preferences.store';
+   import { createDateFormatter, findLocale } from '$lib/utils';
++  import { handleError } from '$lib/utils/handle-error';
+   import { getBytesWithUnit } from '$lib/utils/byte-units';
+-  import { CalendarHeatmapType, getUserCalendarHeatmapAdmin, type UserAdminResponseDto } from '@immich/sdk';
++  import {
++    CalendarHeatmapType,
++    getUserCalendarHeatmapAdmin,
++    updateUserShareAllowlistAdmin,
++    type UserAdminResponseDto,
++    type UserResponseDto,
++  } from '@immich/sdk';
+   import {
+     Alert,
+     Badge,
+@@ -23,12 +31,17 @@
+     getByteUnitString,
+     Heading,
+     Icon,
++    IconButton,
+     MenuItemType,
+     Meter,
+     Stack,
+     Text,
++    modalManager,
++    toastManager,
++    type ActionItem,
+   } from '@immich/ui';
+   import {
++    mdiAccountCheckOutline,
+     mdiAccountOutline,
+     mdiCameraIris,
+     mdiChartPie,
+@@ -38,6 +51,7 @@
+     mdiDevices,
+     mdiFeatureSearchOutline,
+     mdiPlayCircle,
++    mdiPlusBoxOutline,
+     mdiTrashCanOutline,
+   } from '@mdi/js';
+   import type { Snippet } from 'svelte';
+@@ -54,7 +68,7 @@
+ 
+   const { children, data }: Props = $props();
+ 
+-  const { user, userPreferences, userStatistics, userSessions } = $derived(data);
++  const { user, userPreferences, userStatistics, userSessions, shareAllowlist } = $derived(data);
+   const usedBytes = $derived(user.quotaUsageInBytes ?? 0);
+   const availableBytes = $derived(user.quotaSizeInBytes ?? 0);
+   const TiB = 1024 ** 4;
+@@ -87,6 +101,41 @@
+       await goto(Route.users());
+     }
+   };
++
++  const saveShareAllowlist = async (allowedUserIds: string[]) => {
++    try {
++      await updateUserShareAllowlistAdmin({
++        id: user.id,
++        userShareAllowlistUpdateDto: { allowedUserIds },
++      });
++      await invalidateAll();
++      toastManager.primary($t('admin.share_allowlist_updated'));
++    } catch (error) {
++      handleError(error, $t('errors.unable_to_update_share_allowlist'));
++    }
++  };
++
++  const addAllowedUsers = async (usersToAdd: UserResponseDto[]) => {
++    const allowedUserIds = [...shareAllowlist.allowedUsers.map(({ id }) => id), ...usersToAdd.map(({ id }) => id)];
++    await saveShareAllowlist(allowedUserIds);
++  };
++
++  const removeAllowedUser = async (userToRemove: UserResponseDto) => {
++    const allowedUserIds = shareAllowlist.allowedUsers.filter(({ id }) => id !== userToRemove.id).map(({ id }) => id);
++    await saveShareAllowlist(allowedUserIds);
++  };
++
++  const AddAllowedUser: ActionItem = $derived({
++    icon: mdiPlusBoxOutline,
++    title: $t('add'),
++    onAction: async () => {
++      const excludedUserIds = [user.id, ...shareAllowlist.allowedUsers.map(({ id }) => id)];
++      const usersToAdd = await modalManager.show(ShareAllowlistAddModal, { excludedUserIds });
++      if (usersToAdd && usersToAdd.length > 0) {
++        await addAllowedUsers(usersToAdd);
++      }
++    },
++  });
+ </script>
+ 
+ <OnEvents
+@@ -213,6 +262,31 @@
+           </Stack>
+         </AdminCard>
+ 
++        <AdminCard icon={mdiAccountCheckOutline} title={$t('admin.share_allowlist')} headerAction={AddAllowedUser}>
++          <Stack gap={3}>
++            <Text size="tiny" color="muted">{$t('admin.share_allowlist_description')}</Text>
++            {#each shareAllowlist.allowedUsers as allowedUser (allowedUser.id)}
++              <div class="flex w-full items-center justify-between gap-2">
++                <div class="flex items-center gap-2">
++                  <UserAvatar user={allowedUser} size="sm" />
++                  <Text size="small">{allowedUser.name}</Text>
++                </div>
++                <IconButton
++                  color="danger"
++                  variant="ghost"
++                  shape="round"
++                  icon={mdiTrashCanOutline}
++                  aria-label={$t('remove')}
++                  size="small"
++                  onclick={() => removeAllowedUser(allowedUser)}
++                />
++              </div>
++            {:else}
++              <span class="text-dark">{$t('admin.share_allowlist_not_active')}</span>
++            {/each}
++          </Stack>
++        </AdminCard>
++
+         <div class="col-span-full px-4 py-2">
+           <div class="flex gap-2 text-primary">
+             <Icon icon={mdiCloudUploadOutline} size="1.5rem" />
+diff --git a/web/src/routes/admin/users/[id]/+layout.ts b/web/src/routes/admin/users/[id]/+layout.ts
+index 56e3a47..59035f0 100644
+--- a/web/src/routes/admin/users/[id]/+layout.ts
++++ b/web/src/routes/admin/users/[id]/+layout.ts
+@@ -1,4 +1,10 @@
+-import { getUserPreferencesAdmin, getUserSessionsAdmin, getUserStatisticsAdmin, searchUsersAdmin } from '@immich/sdk';
++import {
++  getUserPreferencesAdmin,
++  getUserSessionsAdmin,
++  getUserShareAllowlistAdmin,
++  getUserStatisticsAdmin,
++  searchUsersAdmin,
++} from '@immich/sdk';
+ import { redirect } from '@sveltejs/kit';
+ import { UUID_REGEX } from '$lib/constants';
+ import { Route } from '$lib/route';
+@@ -19,10 +25,11 @@ export const load = (async ({ params, url }) => {
+     redirect(307, Route.users());
+   }
+ 
+-  const [userPreferences, userStatistics, userSessions] = await Promise.all([
++  const [userPreferences, userStatistics, userSessions, shareAllowlist] = await Promise.all([
+     getUserPreferencesAdmin({ id: user.id }),
+     getUserStatisticsAdmin({ id: user.id }),
+     getUserSessionsAdmin({ id: user.id }),
++    getUserShareAllowlistAdmin({ id: user.id }),
+   ]);
+ 
+   const $t = await getFormatter();
+@@ -32,6 +39,7 @@ export const load = (async ({ params, url }) => {
+     userPreferences,
+     userStatistics,
+     userSessions,
++    shareAllowlist,
+     meta: {
+       title: $t('admin.user_details'),
+     },
+-- 
+2.43.0
+
