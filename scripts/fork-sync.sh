@@ -31,18 +31,33 @@ if [[ "${1:-}" == "--continue" ]]; then
 fi
 
 if [[ "${1:-}" == "--export-patches" ]]; then
-  # Régénère fork-patches/*.patch à partir des commits de `fork` situés
-  # après le point où `fork` divergeait de `main` avant ce sync.
+  # Régénère fork-patches/*.patch à partir des commits de `fork` qui
+  # portent un trailer "Fork-Patch: NNNN-nom-court" — c'est ce trailer,
+  # pas la position dans l'historique, qui identifie un commit comme
+  # "patch de feature" (par opposition aux commits d'infra comme celui-ci,
+  # qui ne doivent jamais finir dans fork-patches/).
   base_sha=$(git merge-base main fork)
-  rm -f fork-patches/*.patch
-  git format-patch "$base_sha" --output-directory fork-patches/ --numbered --zero-commit --no-signature >/dev/null
+  shas=$(git log --format="%H" --reverse "$base_sha..fork")
 
-  # Renomme selon la convention NNNN-nom-court.patch en gardant l'ordre
-  # de fork-patches/series existant si les titres correspondent, sinon
-  # laisse les noms générés par git (préfixe numérique déjà correct) et
-  # prévient l'utilisateur de vérifier `series` à la main.
-  echo "==> Patches régénérés dans fork-patches/. Vérifie que fork-patches/series"
-  echo "    liste bien les mêmes fichiers dans le même ordre (renomme si besoin)."
+  tmpdir=$(mktemp -d)
+  found_any=false
+  for sha in $shas; do
+    name=$(git log -1 --format="%(trailers:key=Fork-Patch,valueonly)" "$sha" | head -1)
+    if [[ -z "$name" ]]; then
+      continue # commit d'infra, pas un patch de feature : on l'ignore
+    fi
+    found_any=true
+    git format-patch -1 "$sha" --output-directory "$tmpdir" --start-number 1 --numbered-files --zero-commit --no-signature >/dev/null
+    mv "$tmpdir"/1 "fork-patches/${name}.patch"
+  done
+  rm -rf "$tmpdir"
+
+  if [[ "$found_any" == false ]]; then
+    echo "==> Aucun commit avec trailer Fork-Patch trouvé, rien à exporter."
+  else
+    echo "==> Patches régénérés dans fork-patches/ (identifiés par trailer 'Fork-Patch:')."
+    echo "    Vérifie que fork-patches/series liste bien les mêmes fichiers, dans le même ordre."
+  fi
   exit 0
 fi
 

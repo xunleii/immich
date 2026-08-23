@@ -1,4 +1,4 @@
-From dfd11d47fea3ba7ad673582e8224724da312bc34 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Claude <claude@anthropic.com>
 Date: Sun, 23 Aug 2026 00:54:47 +0000
 Subject: [PATCH] feat: admin-managed share allowlist (server + web)
@@ -15,6 +15,8 @@ the users on the list. Accounts with no entries are unrestricted
 - OpenAPI spec + @immich/sdk regenerated
 
 Based on immich-app/immich@b26b0cc
+
+Fork-Patch: 0001-admin-share-allowlist
 ---
  i18n/en.json                                  |   8 +
  open-api/immich-openapi-specs.json            | 156 ++++++++++++++++++
@@ -976,6 +978,3 @@ index 56e3a47..59035f0 100644
      meta: {
        title: $t('admin.user_details'),
      },
--- 
-2.43.0
-
