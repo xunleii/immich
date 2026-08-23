@@ -1,0 +1,877 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Sun, 23 Aug 2026 07:04:12 +0000
+Subject: [PATCH] feat: admin-forced facial recognition sharing between users
+
+Admin action to directly merge a user into another account's cluster
+group, bypassing the normal invite/accept flow that already exists
+upstream (v3.2.0). Once merged, both accounts share the same named
+(recognized) people across their libraries.
+
+Concrete use case: P1 owns photos and has named people in them. Admin
+wants P2 to see/benefit from that facial recognition without needing
+P1 to send an invite and P2 to accept it.
+
+- admin API: GET/PUT/DELETE /admin/users/:id/cluster-group/members,
+  reusing personRepository.reassignCluster + userRepository.update -
+  the exact same primitives the existing self-service accept/leave
+  flow already uses and has tested
+- web UI: new 'Facial Recognition Sharing' card on /admin/users/:id
+- OpenAPI spec + @immich/sdk regenerated
+
+Triggering the actual face detection/recognition ML jobs (if a
+library hasn't been processed yet) does NOT need a fork patch - it's
+already exposed to admins via the stock 'Jobs' admin page (Face
+Detection / Facial Recognition, with a 'force' re-run option).
+
+Based on immich-app/immich@b26b0cc
+
+Fork-Patch: 0002-admin-cluster-group-merge
+---
+ i18n/en.json                                  |   9 +
+ open-api/immich-openapi-specs.json            | 217 ++++++++++++++++++
+ packages/sdk/src/fetch-client.ts              |  52 +++++
+ .../src/controllers/user-admin.controller.ts  |  53 +++++
+ server/src/dtos/cluster-group-admin.dto.ts    |  26 +++
+ .../src/services/user-admin.service.spec.ts   |  87 +++++++
+ server/src/services/user-admin.service.ts     |  66 ++++++
+ .../modals/ClusterGroupAdminAddModal.svelte   |  56 +++++
+ .../routes/admin/users/[id]/+layout.svelte    |  66 +++++-
+ web/src/routes/admin/users/[id]/+layout.ts    |   5 +-
+ 10 files changed, 635 insertions(+), 2 deletions(-)
+ create mode 100644 server/src/dtos/cluster-group-admin.dto.ts
+ create mode 100644 web/src/lib/modals/ClusterGroupAdminAddModal.svelte
+
+diff --git a/i18n/en.json b/i18n/en.json
+index 8003dc9..dfc657a 100644
+--- a/i18n/en.json
++++ b/i18n/en.json
+@@ -43,6 +43,7 @@
+   "added_to_favorites_count": "Added {count, number} to favorites",
+   "admin": {
+     "add_allowed_share_user": "Allow sharing with",
++    "add_cluster_group_member": "Share facial recognition with",
+     "add_exclusion_pattern_description": "Add exclusion patterns. Globbing using *, **, and ? is supported. To ignore all files in any directory named \"Raw\", use \"**/Raw/**\". To ignore all files ending in \".tif\", use \"**/*.tif\". To ignore an absolute path, use \"/path/to/ignore/**\".",
+     "admin_user": "Admin User",
+     "asset_offline_description": "This external library asset is no longer found on disk and has been moved to trash. If the file was moved within the library, check your timeline for the new corresponding asset. To restore this asset, please ensure that the file path below can be accessed by Immich and scan the library.",
+@@ -64,6 +65,13 @@
+     "backup_settings": "Database Dump Settings",
+     "backup_settings_description": "Manage database dump settings.",
+     "cleared_jobs": "Cleared jobs for: {job}",
++    "cluster_group": "Facial Recognition Sharing",
++    "cluster_group_add_description": "Select a user to merge into this account's cluster group. Both accounts will then share the same named (recognized) people.",
++    "cluster_group_alone": "Not sharing with anyone - this account has its own facial recognition data.",
++    "cluster_group_description": "Users below share the same named (recognized) people as this account. Removing a user gives them a fresh, independent set of recognized people.",
++    "cluster_group_member_added": "Cluster group member added",
++    "cluster_group_member_removed": "Cluster group member removed",
++    "cluster_group_no_more_users": "There are no more users to add.",
+     "config_set_by_file": "Config is currently set by a config file",
+     "confirm_delete_library": "Are you sure you want to delete {library} library?",
+     "confirm_delete_library_assets": "Are you sure you want to delete this library? This will delete {count, plural, one {# contained asset} other {all # contained assets}} from Immich and cannot be undone. Files will remain on disk.",
+@@ -1101,6 +1109,7 @@
+     "unable_to_unlink_motion_video": "Unable to unlink motion video",
+     "unable_to_update_album_cover": "Unable to update album cover",
+     "unable_to_update_album_info": "Unable to update album info",
++    "unable_to_update_cluster_group": "Unable to update cluster group",
+     "unable_to_update_library": "Unable to update library",
+     "unable_to_update_location": "Unable to update location",
+     "unable_to_update_settings": "Unable to update settings",
+diff --git a/open-api/immich-openapi-specs.json b/open-api/immich-openapi-specs.json
+index 618e6e0..766876c 100644
+--- a/open-api/immich-openapi-specs.json
++++ b/open-api/immich-openapi-specs.json
+@@ -1803,6 +1803,194 @@
+         "x-immich-state": "Stable"
+       }
+     },
++    "/admin/users/{id}/cluster-group/members": {
++      "get": {
++        "description": "Retrieve the users currently sharing facial recognition (named people) with this account, including itself.",
++        "operationId": "getUserClusterGroupMembersAdmin",
++        "parameters": [
++          {
++            "name": "id",
++            "required": true,
++            "in": "path",
++            "schema": {
++              "format": "uuid",
++              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
++              "type": "string"
++            }
++          }
++        ],
++        "responses": {
++          "200": {
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/ClusterGroupAdminMembersResponseDto"
++                }
++              }
++            },
++            "description": ""
++          }
++        },
++        "security": [
++          {
++            "bearer": []
++          },
++          {
++            "cookie": []
++          },
++          {
++            "api_key": []
++          }
++        ],
++        "summary": "Retrieve cluster group members",
++        "tags": [
++          "Users (admin)"
++        ],
++        "x-immich-admin-only": true,
++        "x-immich-history": [
++          {
++            "version": "v1",
++            "state": "Added"
++          },
++          {
++            "version": "v1",
++            "state": "Stable"
++          }
++        ],
++        "x-immich-permission": "adminUser.read",
++        "x-immich-state": "Stable"
++      },
++      "put": {
++        "description": "Merge another user's cluster group into this account's, so both accounts share the same named (recognized) people. Bypasses the normal invite/accept flow.",
++        "operationId": "addUserClusterGroupMemberAdmin",
++        "parameters": [
++          {
++            "name": "id",
++            "required": true,
++            "in": "path",
++            "schema": {
++              "format": "uuid",
++              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
++              "type": "string"
++            }
++          }
++        ],
++        "requestBody": {
++          "content": {
++            "application/json": {
++              "schema": {
++                "$ref": "#/components/schemas/ClusterGroupAdminAddMemberDto"
++              }
++            }
++          },
++          "required": true
++        },
++        "responses": {
++          "200": {
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/ClusterGroupAdminMembersResponseDto"
++                }
++              }
++            },
++            "description": ""
++          }
++        },
++        "security": [
++          {
++            "bearer": []
++          },
++          {
++            "cookie": []
++          },
++          {
++            "api_key": []
++          }
++        ],
++        "summary": "Add a cluster group member",
++        "tags": [
++          "Users (admin)"
++        ],
++        "x-immich-admin-only": true,
++        "x-immich-history": [
++          {
++            "version": "v1",
++            "state": "Added"
++          },
++          {
++            "version": "v1",
++            "state": "Stable"
++          }
++        ],
++        "x-immich-permission": "adminUser.update",
++        "x-immich-state": "Stable"
++      }
++    },
++    "/admin/users/{id}/cluster-group/members/{memberId}": {
++      "delete": {
++        "description": "Remove a user from this account's cluster group, giving them a fresh cluster group of their own. Stops sharing facial recognition data between the two accounts.",
++        "operationId": "removeUserClusterGroupMemberAdmin",
++        "parameters": [
++          {
++            "name": "id",
++            "required": true,
++            "in": "path",
++            "schema": {
++              "type": "string"
++            }
++          },
++          {
++            "name": "memberId",
++            "required": true,
++            "in": "path",
++            "schema": {
++              "type": "string"
++            }
++          }
++        ],
++        "responses": {
++          "200": {
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/ClusterGroupAdminMembersResponseDto"
++                }
++              }
++            },
++            "description": ""
++          }
++        },
++        "security": [
++          {
++            "bearer": []
++          },
++          {
++            "cookie": []
++          },
++          {
++            "api_key": []
++          }
++        ],
++        "summary": "Remove a cluster group member",
++        "tags": [
++          "Users (admin)"
++        ],
++        "x-immich-admin-only": true,
++        "x-immich-history": [
++          {
++            "version": "v1",
++            "state": "Added"
++          },
++          {
++            "version": "v1",
++            "state": "Stable"
++          }
++        ],
++        "x-immich-permission": "adminUser.update",
++        "x-immich-state": "Stable"
++      }
++    },
+     "/admin/users/{id}/preferences": {
+       "get": {
+         "description": "Retrieve the preferences of a specific user.",
+@@ -20953,6 +21141,35 @@
+         ],
+         "type": "object"
+       },
++      "ClusterGroupAdminAddMemberDto": {
++        "properties": {
++          "userId": {
++            "description": "User to merge into this account's cluster group. Both accounts will then share the same named (recognized) people across their libraries. Bypasses the normal invite/accept flow - admin only.",
++            "format": "uuid",
++            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
++            "type": "string"
++          }
++        },
++        "required": [
++          "userId"
++        ],
++        "type": "object"
++      },
++      "ClusterGroupAdminMembersResponseDto": {
++        "properties": {
++          "members": {
++            "description": "Users currently sharing facial recognition (named people) with this account, including itself.",
++            "items": {
++              "$ref": "#/components/schemas/UserResponseDto"
++            },
++            "type": "array"
++          }
++        },
++        "required": [
++          "members"
++        ],
++        "type": "object"
++      },
+       "ClusterGroupRequestCreateDto": {
+         "properties": {
+           "userId": {
+diff --git a/packages/sdk/src/fetch-client.ts b/packages/sdk/src/fetch-client.ts
+index 6c6ce35..e252616 100644
+--- a/packages/sdk/src/fetch-client.ts
++++ b/packages/sdk/src/fetch-client.ts
+@@ -646,6 +646,14 @@ export type CalendarHeatmapResponseDto = {
+     /** Total activity count over the period */
+     totalCount: number;
+ };
++export type ClusterGroupAdminMembersResponseDto = {
++    /** Users currently sharing facial recognition (named people) with this account, including itself. */
++    members: UserResponseDto[];
++};
++export type ClusterGroupAdminAddMemberDto = {
++    /** User to merge into this account's cluster group. Both accounts will then share the same named (recognized) people across their libraries. Bypasses the normal invite/accept flow - admin only. */
++    userId: string;
++};
+ export type AlbumsResponse = {
+     defaultAssetOrder: AssetOrder;
+ };
+@@ -3989,6 +3997,50 @@ export function getUserCalendarHeatmapAdmin({ $from, id, to, $type }: {
+         ...opts
+     }));
+ }
++/**
++ * Retrieve cluster group members
++ */
++export function getUserClusterGroupMembersAdmin({ id }: {
++    id: string;
++}, opts?: Oazapfts.RequestOpts) {
++    return oazapfts.ok(oazapfts.fetchJson<{
++        status: 200;
++        data: ClusterGroupAdminMembersResponseDto;
++    }>(`/admin/users/${encodeURIComponent(id)}/cluster-group/members`, {
++        ...opts
++    }));
++}
++/**
++ * Add a cluster group member
++ */
++export function addUserClusterGroupMemberAdmin({ id, clusterGroupAdminAddMemberDto }: {
++    id: string;
++    clusterGroupAdminAddMemberDto: ClusterGroupAdminAddMemberDto;
++}, opts?: Oazapfts.RequestOpts) {
++    return oazapfts.ok(oazapfts.fetchJson<{
++        status: 200;
++        data: ClusterGroupAdminMembersResponseDto;
++    }>(`/admin/users/${encodeURIComponent(id)}/cluster-group/members`, oazapfts.json({
++        ...opts,
++        method: "PUT",
++        body: clusterGroupAdminAddMemberDto
++    })));
++}
++/**
++ * Remove a cluster group member
++ */
++export function removeUserClusterGroupMemberAdmin({ id, memberId }: {
++    id: string;
++    memberId: string;
++}, opts?: Oazapfts.RequestOpts) {
++    return oazapfts.ok(oazapfts.fetchJson<{
++        status: 200;
++        data: ClusterGroupAdminMembersResponseDto;
++    }>(`/admin/users/${encodeURIComponent(id)}/cluster-group/members/${encodeURIComponent(memberId)}`, {
++        ...opts,
++        method: "DELETE"
++    }));
++}
+ /**
+  * Retrieve user preferences
+  */
+diff --git a/server/src/controllers/user-admin.controller.ts b/server/src/controllers/user-admin.controller.ts
+index 40d4309..8b6c77b 100644
+--- a/server/src/controllers/user-admin.controller.ts
++++ b/server/src/controllers/user-admin.controller.ts
+@@ -4,6 +4,10 @@ import { Endpoint, HistoryBuilder } from 'src/decorators';
+ import { AssetStatsDto, AssetStatsResponseDto } from 'src/dtos/asset.dto';
+ import { AuthDto } from 'src/dtos/auth.dto';
+ import { CalendarHeatmapDto, CalendarHeatmapResponseDto } from 'src/dtos/calendar-heatmap.dto';
++import {
++  ClusterGroupAdminAddMemberDto,
++  ClusterGroupAdminMembersResponseDto,
++} from 'src/dtos/cluster-group-admin.dto';
+ import { SessionResponseDto } from 'src/dtos/session.dto';
+ import { UserPreferencesResponseDto, UserPreferencesUpdateDto } from 'src/dtos/user-preferences.dto';
+ import {
+@@ -229,4 +233,53 @@ export class UserAdminController {
+   ): Promise<UserShareAllowlistResponseDto> {
+     return this.service.updateShareAllowlist(auth, id, dto);
+   }
++
++  @Get(':id/cluster-group/members')
++  @Authenticated({ permission: Permission.AdminUserRead, admin: true })
++  @Endpoint({
++    summary: 'Retrieve cluster group members',
++    description:
++      'Retrieve the users currently sharing facial recognition (named people) with this account, including itself.',
++    history: new HistoryBuilder().added('v1').stable('v1'),
++  })
++  getUserClusterGroupMembersAdmin(
++    @Auth() auth: AuthDto,
++    @Param() { id }: UUIDParamDto,
++  ): Promise<ClusterGroupAdminMembersResponseDto> {
++    return this.service.getClusterGroupMembers(auth, id);
++  }
++
++  @Put(':id/cluster-group/members')
++  @Authenticated({ permission: Permission.AdminUserUpdate, admin: true })
++  @Endpoint({
++    summary: 'Add a cluster group member',
++    description:
++      "Merge another user's cluster group into this account's, so both accounts share the same named " +
++      '(recognized) people. Bypasses the normal invite/accept flow.',
++    history: new HistoryBuilder().added('v1').stable('v1'),
++  })
++  addUserClusterGroupMemberAdmin(
++    @Auth() auth: AuthDto,
++    @Param() { id }: UUIDParamDto,
++    @Body() dto: ClusterGroupAdminAddMemberDto,
++  ): Promise<ClusterGroupAdminMembersResponseDto> {
++    return this.service.addClusterGroupMember(auth, id, dto);
++  }
++
++  @Delete(':id/cluster-group/members/:memberId')
++  @Authenticated({ permission: Permission.AdminUserUpdate, admin: true })
++  @Endpoint({
++    summary: 'Remove a cluster group member',
++    description:
++      "Remove a user from this account's cluster group, giving them a fresh cluster group of their own. " +
++      'Stops sharing facial recognition data between the two accounts.',
++    history: new HistoryBuilder().added('v1').stable('v1'),
++  })
++  removeUserClusterGroupMemberAdmin(
++    @Auth() auth: AuthDto,
++    @Param('id') id: string,
++    @Param('memberId') memberId: string,
++  ): Promise<ClusterGroupAdminMembersResponseDto> {
++    return this.service.removeClusterGroupMember(auth, id, memberId);
++  }
+ }
+diff --git a/server/src/dtos/cluster-group-admin.dto.ts b/server/src/dtos/cluster-group-admin.dto.ts
+new file mode 100644
+index 0000000..2d3b726
+--- /dev/null
++++ b/server/src/dtos/cluster-group-admin.dto.ts
+@@ -0,0 +1,26 @@
++import { createZodDto } from 'nestjs-zod';
++import { UserResponseSchema } from 'src/dtos/user.dto';
++import z from 'zod';
++
++export const ClusterGroupAdminAddMemberSchema = z
++  .object({
++    userId: z
++      .uuidv4()
++      .describe(
++        "User to merge into this account's cluster group. Both accounts will then share the same named " +
++          '(recognized) people across their libraries. Bypasses the normal invite/accept flow - admin only.',
++      ),
++  })
++  .meta({ id: 'ClusterGroupAdminAddMemberDto' });
++
++export class ClusterGroupAdminAddMemberDto extends createZodDto(ClusterGroupAdminAddMemberSchema) {}
++
++export const ClusterGroupAdminMembersResponseSchema = z
++  .object({
++    members: z
++      .array(UserResponseSchema)
++      .describe('Users currently sharing facial recognition (named people) with this account, including itself.'),
++  })
++  .meta({ id: 'ClusterGroupAdminMembersResponseDto' });
++
++export class ClusterGroupAdminMembersResponseDto extends createZodDto(ClusterGroupAdminMembersResponseSchema) {}
+diff --git a/server/src/services/user-admin.service.spec.ts b/server/src/services/user-admin.service.spec.ts
+index c52ae54..aedcec7 100644
+--- a/server/src/services/user-admin.service.spec.ts
++++ b/server/src/services/user-admin.service.spec.ts
+@@ -3,6 +3,7 @@ import { mapUserAdmin } from 'src/dtos/user.dto';
+ import { JobName, UserStatus } from 'src/enum';
+ import { UserAdminService } from 'src/services/user-admin.service';
+ import { AuthFactory } from 'test/factories/auth.factory';
++import { ClusterGroupFactory } from 'test/factories/cluster-group.factory';
+ import { UserFactory } from 'test/factories/user.factory';
+ import { authStub } from 'test/fixtures/auth.stub';
+ import { userStub } from 'test/fixtures/user.stub';
+@@ -180,4 +181,90 @@ describe(UserAdminService.name, () => {
+       expect(mocks.user.restore).toHaveBeenCalledWith(userStub.user1.id);
+     });
+   });
++
++  describe('getClusterGroupMembers', () => {
++    it('should list the members of the cluster group', async () => {
++      const owner = UserFactory.create({ clusterGroupId: 'cluster-a' });
++      const member = UserFactory.create({ clusterGroupId: 'cluster-a' });
++      mocks.user.get.mockResolvedValue(owner);
++      mocks.clusterGroup.getUsers.mockResolvedValue([owner, member]);
++
++      const result = await sut.getClusterGroupMembers(authStub.admin, owner.id);
++
++      expect(mocks.clusterGroup.getUsers).toHaveBeenCalledWith({ clusterGroupId: 'cluster-a', userId: owner.id });
++      expect(result.members).toHaveLength(2);
++    });
++  });
++
++  describe('addClusterGroupMember', () => {
++    it('should reject adding a user to their own cluster group', async () => {
++      await expect(
++        sut.addClusterGroupMember(authStub.admin, userStub.admin.id, { userId: userStub.admin.id }),
++      ).rejects.toBeInstanceOf(BadRequestException);
++      expect(mocks.person.reassignCluster).not.toHaveBeenCalled();
++    });
++
++    it('should reject if the target is already in the same cluster group', async () => {
++      const owner = UserFactory.create({ clusterGroupId: 'cluster-a' });
++      const target = UserFactory.create({ clusterGroupId: 'cluster-a' });
++      mocks.user.get.mockImplementation((userId) =>
++        Promise.resolve([owner, target].find((user) => user.id === userId)),
++      );
++
++      await expect(
++        sut.addClusterGroupMember(authStub.admin, owner.id, { userId: target.id }),
++      ).rejects.toBeInstanceOf(BadRequestException);
++      expect(mocks.person.reassignCluster).not.toHaveBeenCalled();
++    });
++
++    it('should merge the target user into the cluster group', async () => {
++      const owner = UserFactory.create({ clusterGroupId: 'cluster-a' });
++      const target = UserFactory.create({ clusterGroupId: 'cluster-b' });
++      mocks.user.get.mockImplementation((userId) =>
++        Promise.resolve([owner, target].find((user) => user.id === userId)),
++      );
++      mocks.clusterGroup.getUsers.mockResolvedValue([owner, target]);
++
++      await sut.addClusterGroupMember(authStub.admin, owner.id, { userId: target.id });
++
++      expect(mocks.person.reassignCluster).toHaveBeenCalledWith({
++        userId: target.id,
++        newClusterId: 'cluster-a',
++      });
++      expect(mocks.user.update).toHaveBeenCalledWith(target.id, { clusterGroupId: 'cluster-a' });
++    });
++  });
++
++  describe('removeClusterGroupMember', () => {
++    it('should reject removing a user not in the cluster group', async () => {
++      const owner = UserFactory.create({ clusterGroupId: 'cluster-a' });
++      const other = UserFactory.create({ clusterGroupId: 'cluster-b' });
++      mocks.user.get.mockImplementation((userId) =>
++        Promise.resolve([owner, other].find((user) => user.id === userId)),
++      );
++
++      await expect(
++        sut.removeClusterGroupMember(authStub.admin, owner.id, other.id),
++      ).rejects.toBeInstanceOf(BadRequestException);
++      expect(mocks.person.reassignCluster).not.toHaveBeenCalled();
++    });
++
++    it('should give the removed member a fresh cluster group', async () => {
++      const owner = UserFactory.create({ clusterGroupId: 'cluster-a' });
++      const member = UserFactory.create({ clusterGroupId: 'cluster-a' });
++      mocks.user.get.mockImplementation((userId) =>
++        Promise.resolve([owner, member].find((user) => user.id === userId)),
++      );
++      mocks.clusterGroup.create.mockResolvedValue(ClusterGroupFactory.create({ id: 'new-cluster' }));
++      mocks.clusterGroup.getUsers.mockResolvedValue([owner]);
++
++      await sut.removeClusterGroupMember(authStub.admin, owner.id, member.id);
++
++      expect(mocks.person.reassignCluster).toHaveBeenCalledWith({
++        userId: member.id,
++        newClusterId: 'new-cluster',
++      });
++      expect(mocks.user.update).toHaveBeenCalledWith(member.id, { clusterGroupId: 'new-cluster' });
++    });
++  });
+ });
+diff --git a/server/src/services/user-admin.service.ts b/server/src/services/user-admin.service.ts
+index d5d53b6..87931bd 100644
+--- a/server/src/services/user-admin.service.ts
++++ b/server/src/services/user-admin.service.ts
+@@ -3,6 +3,10 @@ import { SALT_ROUNDS } from 'src/constants';
+ import { AssetStatsDto, AssetStatsResponseDto, mapStats } from 'src/dtos/asset.dto';
+ import { AuthDto } from 'src/dtos/auth.dto';
+ import { CalendarHeatmapDto, CalendarHeatmapResponseDto } from 'src/dtos/calendar-heatmap.dto';
++import {
++  ClusterGroupAdminAddMemberDto,
++  ClusterGroupAdminMembersResponseDto,
++} from 'src/dtos/cluster-group-admin.dto';
+ import { SessionResponseDto, mapSession } from 'src/dtos/session.dto';
+ import { UserPreferencesResponseDto, UserPreferencesUpdateDto, mapPreferences } from 'src/dtos/user-preferences.dto';
+ import {
+@@ -189,6 +193,68 @@ export class UserAdminService extends BaseService {
+     return { allowedUsers: allowlist.map((user) => mapUser(user)) };
+   }
+ 
++  // --- cluster group (facial recognition sharing), admin-managed ---
++
++  async getClusterGroupMembers(auth: AuthDto, id: string): Promise<ClusterGroupAdminMembersResponseDto> {
++    const user = await this.findOrFail(id, {});
++    const members = await this.clusterGroupRepository.getUsers({ clusterGroupId: user.clusterGroupId, userId: id });
++    return { members: members.map((member) => mapUser(member)) };
++  }
++
++  /**
++   * Merges `userId` into `id`'s cluster group: from then on both accounts
++   * share the same named (recognized) people. Unlike the self-service
++   * cluster group request/accept flow, this is admin-forced and needs no
++   * consent from either account.
++   */
++  async addClusterGroupMember(
++    auth: AuthDto,
++    id: string,
++    { userId }: ClusterGroupAdminAddMemberDto,
++  ): Promise<ClusterGroupAdminMembersResponseDto> {
++    if (userId === id) {
++      throw new BadRequestException('User is already a member of their own cluster group');
++    }
++
++    const user = await this.findOrFail(id, {});
++    const target = await this.findOrFail(userId, {});
++
++    if (target.clusterGroupId === user.clusterGroupId) {
++      throw new BadRequestException('User is already a member of this cluster group');
++    }
++
++    await this.personRepository.reassignCluster({ userId, newClusterId: user.clusterGroupId });
++    await this.userRepository.update(userId, { clusterGroupId: user.clusterGroupId });
++
++    return this.getClusterGroupMembers(auth, id);
++  }
++
++  /**
++   * Removes `memberId` from `id`'s cluster group, giving them a fresh
++   * solo cluster group of their own (mirrors the self-service "leave").
++   */
++  async removeClusterGroupMember(
++    auth: AuthDto,
++    id: string,
++    memberId: string,
++  ): Promise<ClusterGroupAdminMembersResponseDto> {
++    const user = await this.findOrFail(id, {});
++    const member = await this.findOrFail(memberId, {});
++
++    if (member.clusterGroupId !== user.clusterGroupId) {
++      throw new BadRequestException('User is not a member of this cluster group');
++    }
++    if (memberId === id) {
++      throw new BadRequestException('Cannot remove the account itself from its own cluster group this way');
++    }
++
++    const newClusterGroup = await this.clusterGroupRepository.create();
++    await this.personRepository.reassignCluster({ userId: memberId, newClusterId: newClusterGroup.id });
++    await this.userRepository.update(memberId, { clusterGroupId: newClusterGroup.id });
++
++    return this.getClusterGroupMembers(auth, id);
++  }
++
+   private findOrFail(id: string, options: UserFindOptions) {
+     return findOrFail(() => this.userRepository.get(id, options), 'User');
+   }
+diff --git a/web/src/lib/modals/ClusterGroupAdminAddModal.svelte b/web/src/lib/modals/ClusterGroupAdminAddModal.svelte
+new file mode 100644
+index 0000000..2d27e4a
+--- /dev/null
++++ b/web/src/lib/modals/ClusterGroupAdminAddModal.svelte
+@@ -0,0 +1,56 @@
++<script lang="ts">
++  import UserAvatar from '$lib/components/shared-components/UserAvatar.svelte';
++  import { searchUsersAdmin, type UserResponseDto } from '@immich/sdk';
++  import { Button, ListButton, LoadingSpinner, Modal, ModalBody, ModalFooter, Text } from '@immich/ui';
++  import { t } from 'svelte-i18n';
++
++  type Props = {
++    /** the user being configured, and any users already sharing their cluster group */
++    excludedUserIds: string[];
++    onClose: (user?: UserResponseDto) => void;
++  };
++
++  let { excludedUserIds, onClose }: Props = $props();
++
++  let availableUsers: UserResponseDto[] = $state([]);
++  let selectedUser: UserResponseDto | undefined = $state();
++
++  const loadUsers = async () => {
++    const users = await searchUsersAdmin({});
++    const excluded = new Set(excludedUserIds);
++    availableUsers = users.filter(({ id }) => !excluded.has(id));
++  };
++</script>
++
++<Modal title={$t('admin.add_cluster_group_member')} {onClose} size="small">
++  <ModalBody>
++    {#await loadUsers()}
++      <div class="flex w-full place-content-center place-items-center">
++        <LoadingSpinner />
++      </div>
++    {:then _}
++      {#if availableUsers.length > 0}
++        <Text size="tiny" color="muted" class="mb-2">{$t('admin.cluster_group_add_description')}</Text>
++        <div class="flex max-h-75 immich-scrollbar flex-col gap-2 overflow-y-auto">
++          {#each availableUsers as user (user.id)}
++            <ListButton onclick={() => (selectedUser = user)} selected={selectedUser?.id === user.id}>
++              <UserAvatar {user} size="md" />
++              <div class="grow text-start">
++                <Text fontWeight="medium">{user.name}</Text>
++                <Text size="tiny" color="muted">{user.email}</Text>
++              </div>
++            </ListButton>
++          {/each}
++        </div>
++
++        <ModalFooter>
++          <Button shape="round" fullWidth onclick={() => onClose(selectedUser)} disabled={!selectedUser}>
++            {$t('add')}
++          </Button>
++        </ModalFooter>
++      {:else}
++        <Text color="muted">{$t('admin.cluster_group_no_more_users')}</Text>
++      {/if}
++    {/await}
++  </ModalBody>
++</Modal>
+diff --git a/web/src/routes/admin/users/[id]/+layout.svelte b/web/src/routes/admin/users/[id]/+layout.svelte
+index f357ee9..a9cf988 100644
+--- a/web/src/routes/admin/users/[id]/+layout.svelte
++++ b/web/src/routes/admin/users/[id]/+layout.svelte
+@@ -8,6 +8,7 @@
+   import DeviceCard from '$lib/components/user-settings-page/DeviceCard.svelte';
+   import FeatureSetting from './FeatureSetting.svelte';
+   import ShareAllowlistAddModal from '$lib/modals/ShareAllowlistAddModal.svelte';
++  import ClusterGroupAdminAddModal from '$lib/modals/ClusterGroupAdminAddModal.svelte';
+   import { Route } from '$lib/route';
+   import { getUserAdminActions } from '$lib/services/user-admin.service';
+   import { locale } from '$lib/stores/preferences.store';
+@@ -18,6 +19,8 @@
+     CalendarHeatmapType,
+     getUserCalendarHeatmapAdmin,
+     updateUserShareAllowlistAdmin,
++    addUserClusterGroupMemberAdmin,
++    removeUserClusterGroupMemberAdmin,
+     type UserAdminResponseDto,
+     type UserResponseDto,
+   } from '@immich/sdk';
+@@ -49,6 +52,7 @@
+     mdiCheckCircle,
+     mdiCloudUploadOutline,
+     mdiDevices,
++    mdiFaceRecognition,
+     mdiFeatureSearchOutline,
+     mdiPlayCircle,
+     mdiPlusBoxOutline,
+@@ -68,7 +72,7 @@
+ 
+   const { children, data }: Props = $props();
+ 
+-  const { user, userPreferences, userStatistics, userSessions, shareAllowlist } = $derived(data);
++  const { user, userPreferences, userStatistics, userSessions, shareAllowlist, clusterGroupMembers } = $derived(data);
+   const usedBytes = $derived(user.quotaUsageInBytes ?? 0);
+   const availableBytes = $derived(user.quotaSizeInBytes ?? 0);
+   const TiB = 1024 ** 4;
+@@ -136,6 +140,41 @@
+       }
+     },
+   });
++
++  const addClusterGroupMember = async (userToAdd: UserResponseDto) => {
++    try {
++      await addUserClusterGroupMemberAdmin({
++        id: user.id,
++        clusterGroupAdminAddMemberDto: { userId: userToAdd.id },
++      });
++      await invalidateAll();
++      toastManager.primary($t('admin.cluster_group_member_added'));
++    } catch (error) {
++      handleError(error, $t('errors.unable_to_update_cluster_group'));
++    }
++  };
++
++  const removeClusterGroupMember = async (memberToRemove: UserResponseDto) => {
++    try {
++      await removeUserClusterGroupMemberAdmin({ id: user.id, memberId: memberToRemove.id });
++      await invalidateAll();
++      toastManager.primary($t('admin.cluster_group_member_removed'));
++    } catch (error) {
++      handleError(error, $t('errors.unable_to_update_cluster_group'));
++    }
++  };
++
++  const AddClusterGroupMember: ActionItem = $derived({
++    icon: mdiPlusBoxOutline,
++    title: $t('add'),
++    onAction: async () => {
++      const excludedUserIds = clusterGroupMembers.members.map(({ id }) => id);
++      const userToAdd = await modalManager.show(ClusterGroupAdminAddModal, { excludedUserIds });
++      if (userToAdd) {
++        await addClusterGroupMember(userToAdd);
++      }
++    },
++  });
+ </script>
+ 
+ <OnEvents
+@@ -287,6 +326,31 @@
+           </Stack>
+         </AdminCard>
+ 
++        <AdminCard icon={mdiFaceRecognition} title={$t('admin.cluster_group')} headerAction={AddClusterGroupMember}>
++          <Stack gap={3}>
++            <Text size="tiny" color="muted">{$t('admin.cluster_group_description')}</Text>
++            {#each clusterGroupMembers.members.filter((member) => member.id !== user.id) as member (member.id)}
++              <div class="flex w-full items-center justify-between gap-2">
++                <div class="flex items-center gap-2">
++                  <UserAvatar user={member} size="sm" />
++                  <Text size="small">{member.name}</Text>
++                </div>
++                <IconButton
++                  color="danger"
++                  variant="ghost"
++                  shape="round"
++                  icon={mdiTrashCanOutline}
++                  aria-label={$t('remove')}
++                  size="small"
++                  onclick={() => removeClusterGroupMember(member)}
++                />
++              </div>
++            {:else}
++              <span class="text-dark">{$t('admin.cluster_group_alone')}</span>
++            {/each}
++          </Stack>
++        </AdminCard>
++
+         <div class="col-span-full px-4 py-2">
+           <div class="flex gap-2 text-primary">
+             <Icon icon={mdiCloudUploadOutline} size="1.5rem" />
+diff --git a/web/src/routes/admin/users/[id]/+layout.ts b/web/src/routes/admin/users/[id]/+layout.ts
+index 59035f0..8df3872 100644
+--- a/web/src/routes/admin/users/[id]/+layout.ts
++++ b/web/src/routes/admin/users/[id]/+layout.ts
+@@ -1,4 +1,5 @@
+ import {
++  getUserClusterGroupMembersAdmin,
+   getUserPreferencesAdmin,
+   getUserSessionsAdmin,
+   getUserShareAllowlistAdmin,
+@@ -25,11 +26,12 @@ export const load = (async ({ params, url }) => {
+     redirect(307, Route.users());
+   }
+ 
+-  const [userPreferences, userStatistics, userSessions, shareAllowlist] = await Promise.all([
++  const [userPreferences, userStatistics, userSessions, shareAllowlist, clusterGroupMembers] = await Promise.all([
+     getUserPreferencesAdmin({ id: user.id }),
+     getUserStatisticsAdmin({ id: user.id }),
+     getUserSessionsAdmin({ id: user.id }),
+     getUserShareAllowlistAdmin({ id: user.id }),
++    getUserClusterGroupMembersAdmin({ id: user.id }),
+   ]);
+ 
+   const $t = await getFormatter();
+@@ -40,6 +42,7 @@ export const load = (async ({ params, url }) => {
+     userStatistics,
+     userSessions,
+     shareAllowlist,
++    clusterGroupMembers,
+     meta: {
+       title: $t('admin.user_details'),
+     },
