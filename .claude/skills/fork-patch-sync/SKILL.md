@@ -32,67 +32,84 @@ chaque feature que ce skill ne duplique pas.
 
 ## Tâche : mettre à jour le fork (sync upstream)
 
-1. `./scripts/fork-sync.sh` — fetch upstream, fast-forward `main`, tente
-   le rebase de `fork` dessus.
-2. **Si succès sans conflit** : le script régénère automatiquement
-   `fork-patches/*.patch`. Relance ensuite, pour CHAQUE patch listé
-   dans `fork-patches/series`, les commandes de régénération +
-   validation indiquées dans son `.md` (spec OpenAPI/SDK à régénérer,
-   `nest build`, tests, `migrations generate` pour vérifier l'absence
-   de drift, `svelte-check`, `vite build`). Ne pas sauter cette étape
-   même si le rebase n'a montré aucun conflit textuel — un rebase
-   propre au niveau Git n'implique pas que le code compile toujours ni
-   que le spec OpenAPI est à jour.
-3. **Si conflit** : voir section suivante.
-4. Une fois tout validé, commit la régénération de `fork-patches/*.patch`
-   si le contenu a changé (le hash du commit source change à chaque
-   rebase, donc le patch changera même sans conflit — c'est normal).
+**Chemin principal (préféré par l'utilisateur)** : cliquer sur "Sync
+fork" directement sur GitHub, sur la branche `fork` (pas `main`). C'est
+un vrai `git merge`, pas un rebase — c'est pour ça que l'historique de
+`fork` contient des commits `Merge branch 'immich-app:main' into fork`.
+Le système de trailer `Fork-Patch:` a été testé et validé sur ce genre
+d'historique : `--export-patches` (étape 2 ci-dessous) fonctionne
+correctement quelle que soit la topologie (merge ou rebase), aucune
+adaptation nécessaire.
 
-## Tâche : résoudre un conflit de rebase
+1. L'utilisateur (ou toi) clique "Sync fork" sur GitHub. Si GitHub
+   n'arrive pas à merger automatiquement (conflit), il proposera
+   d'ouvrir une PR — dans ce cas, passe plutôt par le chemin local
+   (section suivante) plutôt que de résoudre via l'éditeur web GitHub.
+2. Une fois la sync GitHub faite : `git fetch fork fork:fork &&
+   git checkout fork` en local, puis `git fetch origin main &&
+   git checkout main && git merge --ff-only origin/main` pour que
+   `main` reste un mirroir à jour (nécessaire pour que le calcul du
+   trailer-scan dans `--export-patches` reste correct).
+3. `./scripts/fork-sync.sh --export-patches` — régénère
+   `fork-patches/*.patch` à partir de l'état courant de `fork` (le hash
+   source change à chaque sync, donc le contenu du patch peut changer
+   même sans conflit réel — normal, à commiter si différent).
+4. Relance, pour CHAQUE patch listé dans `fork-patches/series`, les
+   commandes de régénération + validation indiquées dans son `.md`
+   (spec OpenAPI/SDK à régénérer, `nest build`, tests, `migrations
+   generate` pour vérifier l'absence de drift, `svelte-check`,
+   `vite build`). Ne jamais sauter cette étape même si la sync GitHub
+   n'a montré aucun conflit — un merge propre au niveau Git n'implique
+   pas que le code compile toujours ni que le spec OpenAPI est à jour.
+5. Commit `fork-patches/*.patch` si leur contenu a changé, puis push.
 
-Le rebase s'arrête sur le premier commit (= premier patch) en conflit.
-Procède commit par commit, jamais plusieurs à la fois :
+**Chemin local alternatif** (pour tester/résoudre un conflit avant de
+synchroniser sur GitHub, ou en headless sans passer par l'UI web) :
+`./scripts/fork-sync.sh` fait le même travail que le bouton GitHub —
+fetch upstream, fast-forward `main`, `git merge main` sur `fork` — puis
+enchaîne automatiquement sur l'étape 3 ci-dessus en cas de succès.
+
+## Tâche : résoudre un conflit de sync (merge)
+
+Contrairement à un rebase, un merge affiche TOUS les fichiers en
+conflit d'un coup (pas commit par commit) — plus simple à traiter :
 
 1. `git status` pour lister les fichiers en conflit.
-2. Ouvre le `.md` du patch en cours (celui qui correspond au commit que
-   `git rebase` est en train de rejouer — le message de commit affiché
-   par `git status`/`git log` indique lequel) et consulte son tableau
-   "Fichiers touchés" pour savoir quel type de conflit attendre sur
-   chaque fichier.
+2. Pour chaque fichier en conflit, identifie quel(s) patch(es) le
+   touche(nt) en consultant le tableau "Fichiers touchés" de chaque
+   `fork-patches/*.md` — plusieurs patches peuvent toucher le même
+   fichier (ex: `user-admin.controller.ts` est partagé par 0001 et
+   0002), lis les deux `.md` dans ce cas.
 3. **Fichiers marqués "généré — ne jamais résoudre à la main"** (spec
    OpenAPI, SDK TypeScript) : ne tente jamais un merge manuel. Résous
-   en gardant simplement ta version du patch (`git checkout --ours
-   <fichier>`) pour permettre au rebase de continuer, puis régénère
-   intégralement le fichier avec les commandes du `.md` une fois le
-   rebase terminé. Un merge manuel sur ces fichiers introduit
-   quasi-systématiquement une désynchronisation subtile entre le spec
-   et le SDK.
+   en gardant ta version (`git checkout --ours <fichier>`), puis
+   régénère intégralement le fichier avec les commandes du `.md`
+   correspondant une fois TOUS les conflits résolus et le merge commité.
 4. **Fichiers de logique métier / DTOs / contrôleurs** : merge normal.
    Comprends l'intention de CHAQUE côté du conflit (le changement
-   upstream ET le patch) avant de trancher — ne prends jamais
+   upstream ET le/les patch(es)) avant de trancher — ne prends jamais
    automatiquement "notre" version ou "leur" version sans lire les deux.
-   Si upstream a renommé/déplacé une fonction que le patch appelle,
+   Si upstream a renommé/déplacé une fonction qu'un patch appelle,
    adapte l'appel du patch au nouveau nom/emplacement plutôt que de
    rétablir l'ancien.
 5. **`i18n/en.json`** : quasi toujours résoluble en gardant les deux
-   blocs de clés (fichier volumineux, clés du patch isolées), puis
+   blocs de clés (fichier volumineux, clés des patches isolées), puis
    `npx prettier --write i18n/en.json` pour retrier.
 6. **`web/.../[id]/+layout.svelte`** ou tout fichier à insertion additive
-   (un bloc de carte/route ajouté par le patch à côté d'autres blocs
-   upstream) : garde les deux blocs sauf si l'un remplace clairement
-   l'autre.
+   (un bloc de carte/route ajouté par un patch à côté d'autres blocs
+   upstream ou d'un autre patch) : garde tous les blocs sauf si l'un
+   remplace clairement l'autre.
 7. Une fois un fichier résolu : `git add <fichier>`.
-8. Quand tous les fichiers en conflit sont résolus : lance les
-   commandes de validation du `.md` du patch **avant** de continuer le
-   rebase, pour attraper une résolution syntaxiquement correcte mais
-   sémantiquement fausse.
-9. `./scripts/fork-sync.sh --continue` — reprend le rebase (et régénère
-   les `.patch` si c'était le dernier commit).
-10. Si un autre commit/patch est en conflit, répète depuis l'étape 2.
-11. En cas de blocage réel (conflit qui remet en cause le design de la
+8. Quand TOUS les fichiers en conflit sont résolus : lance les
+   commandes de validation de chaque `.md` concerné **avant** de
+   finaliser le merge, pour attraper une résolution syntaxiquement
+   correcte mais sémantiquement fausse.
+9. `./scripts/fork-sync.sh --continue` — commite le merge et régénère
+   automatiquement `fork-patches/*.patch`.
+10. En cas de blocage réel (conflit qui remet en cause le design d'une
     feature elle-même, pas juste sa syntaxe) : `./scripts/fork-sync.sh
     --abort` et documente le problème plutôt que de forcer une
-    résolution qui casserait la feature silencieusement.
+    résolution qui casserait une feature silencieusement.
 
 ## Tâche : builder l'image Docker du fork
 
