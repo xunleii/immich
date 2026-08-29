@@ -34,6 +34,10 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    # xunleii/immich is a fork, so `gh pr *` would target the upstream
+    # parent by default — pin every gh command to this repo.
+    env:
+      GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
         with:
