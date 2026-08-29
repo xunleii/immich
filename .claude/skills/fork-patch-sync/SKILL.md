@@ -71,6 +71,13 @@ enchaîne automatiquement sur l'étape 3 ci-dessus en cas de succès.
 
 ## Tâche : résoudre un conflit de sync (merge)
 
+Point d'entrée courant : le workflow `fork-sync-pr.yml` ouvre une PR
+`sync/<tag>` → `fork` en auto-merge. Si elle n'a pas fusionné seule,
+c'est un conflit : `git fetch origin fork:fork && git checkout fork &&
+git merge sync/<tag>` en local, puis résoudre comme ci-dessous (ou
+`./scripts/fork-sync.sh`, équivalent). Ne jamais résoudre via l'éditeur
+web GitHub.
+
 Contrairement à un rebase, un merge affiche TOUS les fichiers en
 conflit d'un coup (pas commit par commit) — plus simple à traiter :
 

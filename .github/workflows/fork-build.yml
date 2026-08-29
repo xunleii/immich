@@ -1,10 +1,15 @@
 name: Build fork image
 
-# Builds and pushes the immich-server image (backend + web) from the
-# `fork` branch, i.e. upstream main + all patches in fork-patches/.
-# Does NOT rebuild the machine-learning image, since this fork never
-# touches it — keep pulling ghcr.io/immich-app/immich-machine-learning
-# directly for that service.
+# Build + push ghcr.io/<owner>/immich-server (backend + static web) from
+# the `fork` branch = upstream main + the fork-patches/ patches.
+#   - on every push to `fork` (including `sync/<tag>` PR merges)
+#   - on manual dispatch
+# Never rebuilds immich-machine-learning: this fork does not modify it,
+# keep pulling ghcr.io/immich-app/immich-machine-learning.
+#
+# When the push is a `sync/<tag>` PR merge (see fork-sync-pr.yml), the
+# image also gets the `:<tag>` tag, and the `<tag>-fork` git tag +
+# matching GitHub release are created.
 
 on:
   push:
@@ -16,8 +21,9 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
   packages: write
+  actions: write
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/immich-server
@@ -34,8 +40,34 @@ jobs:
       - name: Compute tags
         id: meta
         run: |
-          echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-          echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+          git fetch --tags --force --quiet origin || true
+          SHA_SHORT=$(git rev-parse --short HEAD)
+          DATE=$(date -u +%Y%m%d)
+
+          TAGS=$(printf '%s\n' \
+            "${IMAGE_NAME}:latest" \
+            "${IMAGE_NAME}:fork" \
+            "${IMAGE_NAME}:${DATE}-${SHA_SHORT}")
+
+          # sync/<tag> PR merge? -> release
+          UP=$(git log -1 --format='%s %b' HEAD \
+                | grep -oE 'sync/v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?' \
+                | head -1 | cut -d/ -f2 || true)
+          IS_RELEASE=false
+          if [ -n "$UP" ] && ! git rev-parse -q --verify "refs/tags/${UP}-fork" >/dev/null; then
+            IS_RELEASE=true
+            TAGS="${TAGS}"$'\n'"${IMAGE_NAME}:${UP}"
+          fi
+
+          {
+            echo "sha_short=$SHA_SHORT"
+            echo "date=$DATE"
+            echo "is_release=$IS_RELEASE"
+            echo "upstream_version=$UP"
+            echo "tags<<EOF"
+            echo "$TAGS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -53,10 +85,7 @@ jobs:
           context: .
           file: server/Dockerfile
           push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:fork
-            ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.date }}-${{ steps.meta.outputs.sha_short }}
+          tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
@@ -65,10 +94,44 @@ jobs:
             BUILD_SOURCE_REF=fork
             BUILD_SOURCE_COMMIT=${{ github.sha }}
 
+      - name: Tag + release (sync/<tag> PR merge)
+        if: steps.meta.outputs.is_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UP: ${{ steps.meta.outputs.upstream_version }}
+        run: |
+          git tag -a "${UP}-fork" -m "Fork of immich-app/immich ${UP} + patches" || true
+          git push origin "${UP}-fork" || true
+          gh release create "${UP}-fork" \
+            --title "${UP}-fork" \
+            --notes "Fork of **immich-app/immich ${UP}** + the \`fork-patches/series\` patches.
+
+          Image: \`${IMAGE_NAME}:${UP}\` (also \`:latest\`)." \
+            || echo "release ${UP}-fork already exists"
+
+      - name: Re-assert disabled workflows
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for wf in auto-close.yml build-mobile.yml cli.yml close-duplicates.yml \
+            docker.yml docs-build.yml docs-deploy.yml docs-destroy.yml fdroid.yml \
+            fix-format.yml merge-translations.yml org-pr-require-conventional-commit.yml \
+            org-zizmor.yml pr-label-validation.yml pr-labeler.yml prepare-release.yml \
+            preview-label.yaml sdk.yml weblate-lock.yml cache-cleanup.yml ; do
+              gh workflow disable "$wf" --repo "${{ github.repository }}" 2>/dev/null || true
+          done
+
       - name: Summary
         run: |
-          echo "### Image pushed :whale:" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.date }}-${{ steps.meta.outputs.sha_short }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Also tagged \`:latest\` and \`:fork\`." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Image pushed :whale:"
+            echo ""
+            echo "\`${IMAGE_NAME}:${{ steps.meta.outputs.date }}-${{ steps.meta.outputs.sha_short }}\`"
+            echo ""
+            if [ "${{ steps.meta.outputs.is_release }}" = "true" ]; then
+              echo "Release \`${{ steps.meta.outputs.upstream_version }}-fork\` — image also tagged \`:${{ steps.meta.outputs.upstream_version }}\`."
+            else
+              echo "Also tagged \`:latest\` and \`:fork\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

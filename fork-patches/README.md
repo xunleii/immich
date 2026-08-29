@@ -1,46 +1,63 @@
 # fork-patches/
 
-Ce dossier contient l'historique des features maison de ce fork, sous
-forme de patchs `git format-patch`, un fichier par feature, appliqués
-dans l'ordre défini par `series`.
+This folder holds the history of this fork's home-grown features as
+`git format-patch` files — one file per feature, applied in the order
+defined by `series`.
 
-## Modèle
+## Model
 
-- La branche `main` de ce repo est un **miroir strict** de
-  `immich-app/immich:main` — jamais de commit direct dessus.
-- La branche `fork` = `main` + un commit par patch listé dans `series`,
-  dans l'ordre, synchronisée périodiquement avec upstream via un
-  **merge** (bouton "Sync fork" de GitHub utilisé directement sur la
-  branche `fork`, ou `./scripts/fork-sync.sh` en local — les deux font
-  la même chose). C'est la branche qu'on build/déploie.
-- Chaque commit "feature" sur `fork` porte un trailer git
-  `Fork-Patch: NNNN-nom-court` et correspond exactement à un fichier
-  `NNNN-nom-de-la-feature.patch` ici. C'est ce trailer, pas la position
-  dans l'historique, qui identifie un commit comme patch de feature —
-  robuste aux commits de merge et d'infra qui s'intercalent entre deux
-  patches au fil des synchronisations. Un fichier `.md` de même nom
-  documente les fichiers touchés, les risques de conflit connus, et les
-  commandes de régénération/validation à relancer après une sync.
+- This repo's `main` branch is a **strict mirror** of
+  `immich-app/immich:main` — never commit to it directly.
+- The `fork` branch = `main` + one commit per patch listed in `series`,
+  in order, synced periodically with upstream via a **merge** (GitHub's
+  "Sync fork" button used directly on the `fork` branch, or
+  `./scripts/fork-sync.sh` locally — both do the same thing). This is
+  the branch we build and deploy.
+- Each "feature" commit on `fork` carries a `Fork-Patch: NNNN-short-name`
+  git trailer and maps exactly to one `NNNN-feature-name.patch` file
+  here. It is that trailer, not the position in history, that marks a
+  commit as a feature patch — robust to the merge and infra commits
+  that get interleaved between patches over successive syncs. A `.md`
+  file of the same name documents the touched files, known conflict
+  risks, and the regeneration/validation commands to re-run after a
+  sync.
 
-## Voir aussi
+## See also
 
-Toute la mécanique (mise à jour depuis upstream, résolution de conflits,
-ajout d'une nouvelle feature) est documentée dans le skill Claude :
+The whole mechanism (updating from upstream, resolving conflicts,
+adding a new feature) is documented in the Claude skill:
 [`.claude/skills/fork-patch-sync/SKILL.md`](../.claude/skills/fork-patch-sync/SKILL.md).
 
-Le script `scripts/fork-sync.sh` automatise le merge + la régénération
-des patchs après résolution de conflits (ou juste la régénération seule
-via `--export-patches`, après une sync faite depuis GitHub).
+The `scripts/fork-sync.sh` script automates the merge + patch
+regeneration after conflict resolution (or just the regeneration alone
+via `--export-patches`, after a sync done from GitHub).
 
-## Ajouter une nouvelle feature
+## Automation (CI)
 
-1. Développer normalement sur la branche `fork`, en un commit unique et
-   autonome par feature (squash avant de finaliser), avec un trailer
-   `Fork-Patch: NNNN-nom-court` dans le message de commit.
-2. `./scripts/fork-sync.sh --export-patches` — génère automatiquement
-   `fork-patches/NNNN-nom-court.patch` à partir du trailer.
-3. Ajouter `NNNN-nom-court.patch` à la fin de `series`.
-4. Écrire `NNNN-nom-court.md` (copier la structure d'un fichier
-   existant) : fichiers touchés, risques de conflit, commandes de
-   régénération/validation spécifiques à cette feature.
-5. Committer le tout sur `fork`.
+- `.github/workflows/fork-sync-pr.yml` — every 6 h, if a new **stable**
+  `immich-app/immich` release is out, opens a `sync/<tag>` → `fork` PR.
+  If no `fork-patches/` patch conflicts, the PR is merged automatically
+  and `fork-build.yml` is triggered; otherwise the PR stays open, to be
+  resolved with the skill (local path `./scripts/fork-sync.sh`).
+- `.github/workflows/fork-build.yml` — on every push to `fork` or on
+  dispatch after a `sync/<tag>` merge, builds + pushes
+  `ghcr.io/<owner>/immich-server`. For a `sync/<tag>` merge: image
+  tagged `:<tag>`, `<tag>-fork` git tag + GitHub release.
+- No repo secret or setting to configure: everything runs off the
+  workflows' `GITHUB_TOKEN`.
+- The `fork-patches/*.patch` files are **not** regenerated
+  automatically after a CI sync — run `./scripts/fork-sync.sh
+  --export-patches` locally if you need an up-to-date `.patch`.
+
+## Adding a new feature
+
+1. Develop normally on the `fork` branch, as a single self-contained
+   commit per feature (squash before finalizing), with a
+   `Fork-Patch: NNNN-short-name` trailer in the commit message.
+2. `./scripts/fork-sync.sh --export-patches` — generates
+   `fork-patches/NNNN-short-name.patch` from the trailer automatically.
+3. Add `NNNN-short-name.patch` to the end of `series`.
+4. Write `NNNN-short-name.md` (copy the structure of an existing file):
+   touched files, conflict risks, regeneration/validation commands
+   specific to that feature.
+5. Commit everything on `fork`.

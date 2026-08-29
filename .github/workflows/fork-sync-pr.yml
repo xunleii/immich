@@ -1,0 +1,110 @@
+name: Fork sync PR (upstream release)
+
+# Every 6 h: if immich-app/immich has published a stable release that the
+# `fork` branch does not contain yet, push a `sync/<tag>` branch (= the
+# tagged upstream commit) and open a PR against `fork`.
+#   - no conflict with the fork-patches/ patches -> auto-merge, then
+#     trigger fork-build.yml (Docker image + git tag + release).
+#   - conflict -> the PR stays open, to be resolved with the
+#     `fork-patch-sync` skill (`./scripts/fork-sync.sh`).
+#
+# No secret or repo setting required: everything runs off GITHUB_TOKEN
+# (permissions declared below) + an explicit workflow_dispatch to
+# fork-build.yml (dispatch is exempt from GitHub's anti-recursion rule).
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Upstream ref to sync (default: latest stable release)'
+        required: false
+
+concurrency:
+  group: fork-sync-pr
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fork
+          fetch-depth: 0
+
+      - name: Resolve upstream release
+        id: up
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git remote add upstream https://github.com/immich-app/immich.git
+          git fetch --tags --prune --quiet upstream
+          REF='${{ github.event.inputs.ref }}'
+          if [ -z "$REF" ]; then
+            REF=$(gh release list --repo immich-app/immich \
+                    --exclude-pre-releases --exclude-drafts -L1 \
+                    --json tagName -q '.[0].tagName')
+          fi
+          SHA=$(git rev-parse --verify "refs/tags/$REF^{commit}" 2>/dev/null \
+                || git rev-parse --verify "$REF")
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Upstream stable = $REF ($SHA)"
+
+      - name: Already on fork?
+        id: gate
+        run: |
+          if git merge-base --is-ancestor '${{ steps.up.outputs.sha }}' HEAD; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "fork already contains ${{ steps.up.outputs.ref }} — nothing to do."
+          fi
+
+      - name: Push sync branch + open PR
+        if: steps.gate.outputs.skip != 'true'
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BR="sync/${{ steps.up.outputs.ref }}"
+          git push -f origin '${{ steps.up.outputs.sha }}':"refs/heads/$BR"
+          echo "branch=$BR" >> "$GITHUB_OUTPUT"
+
+          if [ -z "$(gh pr list --base fork --head "$BR" --state open --json number -q '.[0].number')" ]; then
+            gh pr create --base fork --head "$BR" \
+              --title "chore(fork): sync with upstream ${{ steps.up.outputs.ref }}" \
+              --body "Automated. Merges on its own if no \`fork-patches/\` patch conflicts, then triggers the image build + release. On conflict, this PR stays open — resolve it with the \`fork-patch-sync\` skill (\`./scripts/fork-sync.sh\`)."
+          fi
+
+      - name: Merge if conflict-free, then trigger build
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BR='${{ steps.pr.outputs.branch }}'
+          for i in $(seq 1 20); do
+            M=$(gh pr view "$BR" --json mergeable -q .mergeable)
+            [ "$M" != "UNKNOWN" ] && break
+            sleep 4
+          done
+          echo "mergeable=$M"
+          case "$M" in
+            MERGEABLE)
+              gh pr merge "$BR" --merge --delete-branch
+              gh workflow run fork-build.yml --ref fork
+              echo "### Sync ${{ steps.up.outputs.ref }} merged :rocket:" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            CONFLICTING)
+              echo "::warning::Conflict with a patch — PR left open, resolve with fork-patch-sync."
+              echo "### Sync ${{ steps.up.outputs.ref }}: conflict, PR left open to resolve" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "::warning::mergeable=$M undetermined — will retry on the next run."
+              ;;
+          esac
