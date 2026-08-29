@@ -43,7 +43,7 @@ Fork-Patch: 0002-admin-cluster-group-merge
  create mode 100644 web/src/lib/modals/ClusterGroupAdminAddModal.svelte
 
 diff --git a/i18n/en.json b/i18n/en.json
-index 8003dc9..dfc657a 100644
+index 8003dc9c7..dfc657a38 100644
 --- a/i18n/en.json
 +++ b/i18n/en.json
 @@ -43,6 +43,7 @@
@@ -77,7 +77,7 @@ index 8003dc9..dfc657a 100644
      "unable_to_update_location": "Unable to update location",
      "unable_to_update_settings": "Unable to update settings",
 diff --git a/open-api/immich-openapi-specs.json b/open-api/immich-openapi-specs.json
-index 618e6e0..766876c 100644
+index 46c1c99bc..cc57fd6ce 100644
 --- a/open-api/immich-openapi-specs.json
 +++ b/open-api/immich-openapi-specs.json
 @@ -1803,6 +1803,194 @@
@@ -275,7 +275,7 @@ index 618e6e0..766876c 100644
      "/admin/users/{id}/preferences": {
        "get": {
          "description": "Retrieve the preferences of a specific user.",
-@@ -20953,6 +21141,35 @@
+@@ -20999,6 +21187,35 @@
          ],
          "type": "object"
        },
@@ -312,7 +312,7 @@ index 618e6e0..766876c 100644
          "properties": {
            "userId": {
 diff --git a/packages/sdk/src/fetch-client.ts b/packages/sdk/src/fetch-client.ts
-index 6c6ce35..e252616 100644
+index 1721b7171..f65746955 100644
 --- a/packages/sdk/src/fetch-client.ts
 +++ b/packages/sdk/src/fetch-client.ts
 @@ -646,6 +646,14 @@ export type CalendarHeatmapResponseDto = {
@@ -382,7 +382,7 @@ index 6c6ce35..e252616 100644
   * Retrieve user preferences
   */
 diff --git a/server/src/controllers/user-admin.controller.ts b/server/src/controllers/user-admin.controller.ts
-index 40d4309..8b6c77b 100644
+index 40d430972..8b6c77b66 100644
 --- a/server/src/controllers/user-admin.controller.ts
 +++ b/server/src/controllers/user-admin.controller.ts
 @@ -4,6 +4,10 @@ import { Endpoint, HistoryBuilder } from 'src/decorators';
@@ -452,7 +452,7 @@ index 40d4309..8b6c77b 100644
  }
 diff --git a/server/src/dtos/cluster-group-admin.dto.ts b/server/src/dtos/cluster-group-admin.dto.ts
 new file mode 100644
-index 0000000..2d3b726
+index 000000000..2d3b726bc
 --- /dev/null
 +++ b/server/src/dtos/cluster-group-admin.dto.ts
 @@ -0,0 +1,26 @@
@@ -483,7 +483,7 @@ index 0000000..2d3b726
 +
 +export class ClusterGroupAdminMembersResponseDto extends createZodDto(ClusterGroupAdminMembersResponseSchema) {}
 diff --git a/server/src/services/user-admin.service.spec.ts b/server/src/services/user-admin.service.spec.ts
-index c52ae54..aedcec7 100644
+index c52ae5422..aedcec7c6 100644
 --- a/server/src/services/user-admin.service.spec.ts
 +++ b/server/src/services/user-admin.service.spec.ts
 @@ -3,6 +3,7 @@ import { mapUserAdmin } from 'src/dtos/user.dto';
@@ -586,7 +586,7 @@ index c52ae54..aedcec7 100644
 +  });
  });
 diff --git a/server/src/services/user-admin.service.ts b/server/src/services/user-admin.service.ts
-index d5d53b6..87931bd 100644
+index d5d53b65c..87931bd32 100644
 --- a/server/src/services/user-admin.service.ts
 +++ b/server/src/services/user-admin.service.ts
 @@ -3,6 +3,10 @@ import { SALT_ROUNDS } from 'src/constants';
@@ -671,7 +671,7 @@ index d5d53b6..87931bd 100644
    }
 diff --git a/web/src/lib/modals/ClusterGroupAdminAddModal.svelte b/web/src/lib/modals/ClusterGroupAdminAddModal.svelte
 new file mode 100644
-index 0000000..2d27e4a
+index 000000000..2d27e4ae0
 --- /dev/null
 +++ b/web/src/lib/modals/ClusterGroupAdminAddModal.svelte
 @@ -0,0 +1,56 @@
@@ -732,7 +732,7 @@ index 0000000..2d27e4a
 +  </ModalBody>
 +</Modal>
 diff --git a/web/src/routes/admin/users/[id]/+layout.svelte b/web/src/routes/admin/users/[id]/+layout.svelte
-index f357ee9..a9cf988 100644
+index f357ee990..a9cf988b8 100644
 --- a/web/src/routes/admin/users/[id]/+layout.svelte
 +++ b/web/src/routes/admin/users/[id]/+layout.svelte
 @@ -8,6 +8,7 @@
@@ -844,7 +844,7 @@ index f357ee9..a9cf988 100644
            <div class="flex gap-2 text-primary">
              <Icon icon={mdiCloudUploadOutline} size="1.5rem" />
 diff --git a/web/src/routes/admin/users/[id]/+layout.ts b/web/src/routes/admin/users/[id]/+layout.ts
-index 59035f0..8df3872 100644
+index 59035f039..8df38726b 100644
 --- a/web/src/routes/admin/users/[id]/+layout.ts
 +++ b/web/src/routes/admin/users/[id]/+layout.ts
 @@ -1,4 +1,5 @@

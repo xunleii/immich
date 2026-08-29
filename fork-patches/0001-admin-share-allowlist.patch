@@ -19,27 +19,31 @@ Based on immich-app/immich@b26b0cc
 Fork-Patch: 0001-admin-share-allowlist
 ---
  i18n/en.json                                  |   8 +
- open-api/immich-openapi-specs.json            | 156 ++++++++++++++++++
- packages/sdk/src/fetch-client.ts              |  37 +++++
- .../src/controllers/user-admin.controller.ts  |  35 ++++
+ open-api/immich-openapi-specs.json            | 202 ++++++++++++++++++
+ packages/sdk/src/fetch-client.ts              |  48 +++++
+ .../src/controllers/user-admin.controller.ts  |  35 +++
+ server/src/controllers/user.controller.ts     |  20 +-
  server/src/dtos/user.dto.ts                   |  26 +++
- server/src/repositories/user.repository.ts    |  92 +++++++++++
+ server/src/repositories/user.repository.ts    |  92 ++++++++
  server/src/schema/index.ts                    |   3 +
- .../1787200000000-AddUserShareAllowlist.ts    |  20 +++
- .../tables/user-share-allowlist.table.ts      |  33 ++++
- server/src/services/album.service.spec.ts     |  35 ++++
- server/src/services/album.service.ts          |  28 ++++
- server/src/services/user-admin.service.ts     |  30 ++++
- .../lib/modals/ShareAllowlistAddModal.svelte  |  62 +++++++
- .../routes/admin/users/[id]/+layout.svelte    |  78 ++++++++-
+ .../1787200000000-AddUserShareAllowlist.ts    |  20 ++
+ .../tables/user-share-allowlist.table.ts      |  33 +++
+ server/src/services/album.service.spec.ts     |  35 +++
+ server/src/services/album.service.ts          |  28 +++
+ server/src/services/user-admin.service.ts     |  30 +++
+ server/src/services/user.service.spec.ts      |  19 ++
+ server/src/services/user.service.ts           |  20 +-
+ web/src/lib/modals/AlbumAddUsersModal.svelte  |   8 +-
+ .../lib/modals/ShareAllowlistAddModal.svelte  |  62 ++++++
+ .../routes/admin/users/[id]/+layout.svelte    |  78 ++++++-
  web/src/routes/admin/users/[id]/+layout.ts    |  12 +-
- 15 files changed, 651 insertions(+), 4 deletions(-)
+ 19 files changed, 771 insertions(+), 8 deletions(-)
  create mode 100644 server/src/schema/migrations/1787200000000-AddUserShareAllowlist.ts
  create mode 100644 server/src/schema/tables/user-share-allowlist.table.ts
  create mode 100644 web/src/lib/modals/ShareAllowlistAddModal.svelte
 
 diff --git a/i18n/en.json b/i18n/en.json
-index 1a9d2fa..8003dc9 100644
+index 1a9d2fa3c..8003dc9c7 100644
 --- a/i18n/en.json
 +++ b/i18n/en.json
 @@ -42,6 +42,7 @@
@@ -72,7 +76,7 @@ index 1a9d2fa..8003dc9 100644
      "unable_to_update_user": "Unable to update user",
      "unable_to_update_workflow": "Unable to update workflow",
 diff --git a/open-api/immich-openapi-specs.json b/open-api/immich-openapi-specs.json
-index 66a430a..618e6e0 100644
+index 66a430ae1..46c1c99bc 100644
 --- a/open-api/immich-openapi-specs.json
 +++ b/open-api/immich-openapi-specs.json
 @@ -2069,6 +2069,130 @@
@@ -206,7 +210,60 @@ index 66a430a..618e6e0 100644
      "/admin/users/{id}/statistics": {
        "get": {
          "description": "Retrieve asset statistics for a specific user.",
-@@ -29525,6 +29649,38 @@
+@@ -16504,6 +16628,52 @@
+         "x-immich-state": "Deprecated"
+       }
+     },
++    "/users/me/share-allowlist": {
++      "get": {
++        "description": "Retrieve the list of users the current account is allowed to share albums/assets with. An empty list means the allowlist is not active (sharing is unrestricted).",
++        "operationId": "getMyShareAllowlist",
++        "parameters": [],
++        "responses": {
++          "200": {
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/UserShareAllowlistResponseDto"
++                }
++              }
++            },
++            "description": ""
++          }
++        },
++        "security": [
++          {
++            "bearer": []
++          },
++          {
++            "cookie": []
++          },
++          {
++            "api_key": []
++          }
++        ],
++        "summary": "Retrieve my share allowlist",
++        "tags": [
++          "Users"
++        ],
++        "x-immich-history": [
++          {
++            "version": "v1",
++            "state": "Added"
++          },
++          {
++            "version": "v1",
++            "state": "Stable"
++          }
++        ],
++        "x-immich-permission": "user.read",
++        "x-immich-state": "Stable"
++      }
++    },
+     "/users/profile-image": {
+       "delete": {
+         "description": "Delete the profile image of the current user.",
+@@ -29525,6 +29695,38 @@
          ],
          "type": "object"
        },
@@ -246,7 +303,7 @@ index 66a430a..618e6e0 100644
          "description": "User status",
          "enum": [
 diff --git a/packages/sdk/src/fetch-client.ts b/packages/sdk/src/fetch-client.ts
-index 98444f4..6c6ce35 100644
+index 98444f4c4..1721b7171 100644
 --- a/packages/sdk/src/fetch-client.ts
 +++ b/packages/sdk/src/fetch-client.ts
 @@ -832,6 +832,14 @@ export type SessionResponseDto = {
@@ -300,8 +357,26 @@ index 98444f4..6c6ce35 100644
  /**
   * Retrieve user statistics
   */
+@@ -7347,6 +7384,17 @@ export function updateMyPreferences({ userPreferencesUpdateDto }: {
+         body: userPreferencesUpdateDto
+     })));
+ }
++/**
++ * Retrieve my share allowlist
++ */
++export function getMyShareAllowlist(opts?: Oazapfts.RequestOpts) {
++    return oazapfts.ok(oazapfts.fetchJson<{
++        status: 200;
++        data: UserShareAllowlistResponseDto;
++    }>("/users/me/share-allowlist", {
++        ...opts
++    }));
++}
+ /**
+  * Delete user profile image
+  */
 diff --git a/server/src/controllers/user-admin.controller.ts b/server/src/controllers/user-admin.controller.ts
-index 18798c0..40d4309 100644
+index 18798c00c..40d430972 100644
 --- a/server/src/controllers/user-admin.controller.ts
 +++ b/server/src/controllers/user-admin.controller.ts
 @@ -12,6 +12,8 @@ import {
@@ -351,8 +426,46 @@ index 18798c0..40d4309 100644
 +    return this.service.updateShareAllowlist(auth, id, dto);
 +  }
  }
+diff --git a/server/src/controllers/user.controller.ts b/server/src/controllers/user.controller.ts
+index 4e93f3c4b..3c2d8024a 100644
+--- a/server/src/controllers/user.controller.ts
++++ b/server/src/controllers/user.controller.ts
+@@ -24,7 +24,12 @@ import { LicenseKeyDto, LicenseResponseDto } from 'src/dtos/license.dto';
+ import { OnboardingDto, OnboardingResponseDto } from 'src/dtos/onboarding.dto';
+ import { UserPreferencesResponseDto, UserPreferencesUpdateDto } from 'src/dtos/user-preferences.dto';
+ import { CreateProfileImageDto, CreateProfileImageResponseDto } from 'src/dtos/user-profile.dto';
+-import { UserAdminResponseDto, UserResponseDto, UserUpdateMeDto } from 'src/dtos/user.dto';
++import {
++  UserAdminResponseDto,
++  UserResponseDto,
++  UserShareAllowlistResponseDto,
++  UserUpdateMeDto,
++} from 'src/dtos/user.dto';
+ import { ApiTag, Permission, RouteKey } from 'src/enum';
+ import { Auth, Authenticated, FileResponse } from 'src/middleware/auth.guard';
+ import { FileUploadInterceptor } from 'src/middleware/file-upload.interceptor';
+@@ -74,6 +79,19 @@ export class UserController {
+     return this.service.getCalendarHeatmap(auth, dto);
+   }
+ 
++  @Get('me/share-allowlist')
++  @Authenticated({ permission: Permission.UserRead })
++  @Endpoint({
++    summary: 'Retrieve my share allowlist',
++    description:
++      'Retrieve the list of users the current account is allowed to share albums/assets with. An empty list means ' +
++      'the allowlist is not active (sharing is unrestricted).',
++    history: new HistoryBuilder().added('v1').stable('v1'),
++  })
++  getMyShareAllowlist(@Auth() auth: AuthDto): Promise<UserShareAllowlistResponseDto> {
++    return this.service.getMyShareAllowlist(auth);
++  }
++
+   @Put('me')
+   @Authenticated({ permission: Permission.UserUpdate })
+   @Endpoint({
 diff --git a/server/src/dtos/user.dto.ts b/server/src/dtos/user.dto.ts
-index 2a15e43..bfdc5b2 100644
+index 2a15e4397..bfdc5b275 100644
 --- a/server/src/dtos/user.dto.ts
 +++ b/server/src/dtos/user.dto.ts
 @@ -158,3 +158,29 @@ export function mapUserAdmin(entity: UserAdmin): UserAdminResponseDto {
@@ -386,7 +499,7 @@ index 2a15e43..bfdc5b2 100644
 +
 +export class UserShareAllowlistResponseDto extends createZodDto(UserShareAllowlistResponseSchema) {}
 diff --git a/server/src/repositories/user.repository.ts b/server/src/repositories/user.repository.ts
-index afe14fb..c3505b2 100644
+index afe14fb49..c3505b2d6 100644
 --- a/server/src/repositories/user.repository.ts
 +++ b/server/src/repositories/user.repository.ts
 @@ -325,4 +325,96 @@ export class UserRepository {
@@ -487,7 +600,7 @@ index afe14fb..c3505b2 100644
 +  }
  }
 diff --git a/server/src/schema/index.ts b/server/src/schema/index.ts
-index 61dc5d8..fb30a56 100644
+index 61dc5d876..fb30a56b5 100644
 --- a/server/src/schema/index.ts
 +++ b/server/src/schema/index.ts
 @@ -85,6 +85,7 @@ import { TagTable } from 'src/schema/tables/tag.table';
@@ -516,7 +629,7 @@ index 61dc5d8..fb30a56 100644
  
 diff --git a/server/src/schema/migrations/1787200000000-AddUserShareAllowlist.ts b/server/src/schema/migrations/1787200000000-AddUserShareAllowlist.ts
 new file mode 100644
-index 0000000..f91710c
+index 000000000..f91710c70
 --- /dev/null
 +++ b/server/src/schema/migrations/1787200000000-AddUserShareAllowlist.ts
 @@ -0,0 +1,20 @@
@@ -542,7 +655,7 @@ index 0000000..f91710c
 +}
 diff --git a/server/src/schema/tables/user-share-allowlist.table.ts b/server/src/schema/tables/user-share-allowlist.table.ts
 new file mode 100644
-index 0000000..c720922
+index 000000000..c72092238
 --- /dev/null
 +++ b/server/src/schema/tables/user-share-allowlist.table.ts
 @@ -0,0 +1,33 @@
@@ -580,7 +693,7 @@ index 0000000..c720922
 +  createdBy!: string;
 +}
 diff --git a/server/src/services/album.service.spec.ts b/server/src/services/album.service.spec.ts
-index a97407b..33554f1 100644
+index a97407b2d..33554f168 100644
 --- a/server/src/services/album.service.spec.ts
 +++ b/server/src/services/album.service.spec.ts
 @@ -18,6 +18,7 @@ describe(AlbumService.name, () => {
@@ -640,7 +753,7 @@ index a97407b..33554f1 100644
        const userId = newUuid();
        const album = AlbumFactory.from().albumUser({ userId }).build();
 diff --git a/server/src/services/album.service.ts b/server/src/services/album.service.ts
-index a94049b..602f508 100644
+index a94049bbd..602f50865 100644
 --- a/server/src/services/album.service.ts
 +++ b/server/src/services/album.service.ts
 @@ -109,6 +109,11 @@ export class AlbumService extends BaseService {
@@ -691,7 +804,7 @@ index a94049b..602f508 100644
 +  }
  }
 diff --git a/server/src/services/user-admin.service.ts b/server/src/services/user-admin.service.ts
-index f80a810..d5d53b6 100644
+index f80a81061..d5d53b65c 100644
 --- a/server/src/services/user-admin.service.ts
 +++ b/server/src/services/user-admin.service.ts
 @@ -11,6 +11,9 @@ import {
@@ -738,9 +851,103 @@ index f80a810..d5d53b6 100644
    private findOrFail(id: string, options: UserFindOptions) {
      return findOrFail(() => this.userRepository.get(id, options), 'User');
    }
+diff --git a/server/src/services/user.service.spec.ts b/server/src/services/user.service.spec.ts
+index a00efe82f..fa99f657c 100644
+--- a/server/src/services/user.service.spec.ts
++++ b/server/src/services/user.service.spec.ts
+@@ -94,6 +94,25 @@ describe(UserService.name, () => {
+     });
+   });
+ 
++  describe('getMyShareAllowlist', () => {
++    it('should return an empty list when the allowlist is inactive', async () => {
++      mocks.user.getShareAllowlist.mockResolvedValue([]);
++
++      await expect(sut.getMyShareAllowlist(authStub.admin)).resolves.toEqual({ allowedUsers: [] });
++      expect(mocks.user.getShareAllowlist).toHaveBeenCalledWith(authStub.admin.user.id);
++    });
++
++    it('should return the allowed users when the allowlist is active', async () => {
++      const allowed = UserFactory.create();
++      mocks.user.getShareAllowlist.mockResolvedValue([allowed] as any);
++
++      const result = await sut.getMyShareAllowlist(authStub.admin);
++
++      expect(result.allowedUsers).toHaveLength(1);
++      expect(result.allowedUsers[0]).toMatchObject({ id: allowed.id, email: allowed.email });
++    });
++  });
++
+   describe('createProfileImage', () => {
+     it('should throw an error if the user does not exist', async () => {
+       const file = { path: '/profile/path' } as Express.Multer.File;
+diff --git a/server/src/services/user.service.ts b/server/src/services/user.service.ts
+index 1630fd9dd..b60fdcbd2 100644
+--- a/server/src/services/user.service.ts
++++ b/server/src/services/user.service.ts
+@@ -10,7 +10,14 @@ import { LicenseKeyDto, LicenseResponseDto } from 'src/dtos/license.dto';
+ import { OnboardingDto, OnboardingResponseDto } from 'src/dtos/onboarding.dto';
+ import { UserPreferencesResponseDto, UserPreferencesUpdateDto, mapPreferences } from 'src/dtos/user-preferences.dto';
+ import { CreateProfileImageResponseDto } from 'src/dtos/user-profile.dto';
+-import { UserAdminResponseDto, UserResponseDto, UserUpdateMeDto, mapUser, mapUserAdmin } from 'src/dtos/user.dto';
++import {
++  UserAdminResponseDto,
++  UserResponseDto,
++  UserShareAllowlistResponseDto,
++  UserUpdateMeDto,
++  mapUser,
++  mapUserAdmin,
++} from 'src/dtos/user.dto';
+ import { CacheControl, JobName, JobStatus, QueueName, StorageFolder, UserMetadataKey } from 'src/enum';
+ import { ArgOf } from 'src/repositories/event.repository';
+ import { UserFindOptions } from 'src/repositories/user.repository';
+@@ -49,6 +56,17 @@ export class UserService extends BaseService {
+     return mapUserAdmin(user);
+   }
+ 
++  /**
++   * The current account's own share allowlist. An empty `allowedUsers`
++   * means the allowlist is inactive (sharing is unrestricted). Used by
++   * the web client to pre-filter the "share with" user picker so a
++   * restricted user only sees the people they may actually share with.
++   */
++  async getMyShareAllowlist(auth: AuthDto): Promise<UserShareAllowlistResponseDto> {
++    const allowlist = await this.userRepository.getShareAllowlist(auth.user.id);
++    return { allowedUsers: allowlist.map((user) => mapUser(user)) };
++  }
++
+   getCalendarHeatmap(auth: AuthDto, dto: CalendarHeatmapDto): Promise<CalendarHeatmapResponseDto> {
+     return getCalendarHeatmap(auth.user.id, dto, { asset: this.assetRepository });
+   }
+diff --git a/web/src/lib/modals/AlbumAddUsersModal.svelte b/web/src/lib/modals/AlbumAddUsersModal.svelte
+index 5b66bd736..eb3cbe4b1 100644
+--- a/web/src/lib/modals/AlbumAddUsersModal.svelte
++++ b/web/src/lib/modals/AlbumAddUsersModal.svelte
+@@ -3,7 +3,7 @@
+   import UserAvatar from '$lib/components/shared-components/UserAvatar.svelte';
+   import { handleAddUsersToAlbum } from '$lib/services/album.service';
+   import { normalizeSearchString } from '$lib/utils/string-utils';
+-  import { searchUsers, type AlbumResponseDto, type UserResponseDto } from '@immich/sdk';
++  import { getMyShareAllowlist, searchUsers, type AlbumResponseDto, type UserResponseDto } from '@immich/sdk';
+   import { FormModal, ListButton, LoadingSpinner, Stack, Text } from '@immich/ui';
+   import { sortBy } from 'lodash-es';
+   import { onMount } from 'svelte';
+@@ -50,7 +50,11 @@
+   };
+ 
+   onMount(async () => {
+-    users = await searchUsers();
++    const [allUsers, { allowedUsers }] = await Promise.all([searchUsers(), getMyShareAllowlist()]);
++    // An active allowlist (non-empty) restricts the picker to those users only;
++    // an empty allowlist means unrestricted sharing, so show everyone.
++    const allowedIds = new Set(allowedUsers.map(({ id }) => id));
++    users = allowedIds.size > 0 ? allUsers.filter(({ id }) => allowedIds.has(id)) : allUsers;
+     loading = false;
+   });
+ </script>
 diff --git a/web/src/lib/modals/ShareAllowlistAddModal.svelte b/web/src/lib/modals/ShareAllowlistAddModal.svelte
 new file mode 100644
-index 0000000..a533a44
+index 000000000..a533a4453
 --- /dev/null
 +++ b/web/src/lib/modals/ShareAllowlistAddModal.svelte
 @@ -0,0 +1,62 @@
@@ -807,7 +1014,7 @@ index 0000000..a533a44
 +  </ModalBody>
 +</Modal>
 diff --git a/web/src/routes/admin/users/[id]/+layout.svelte b/web/src/routes/admin/users/[id]/+layout.svelte
-index dc49e5f..f357ee9 100644
+index dc49e5f42..f357ee990 100644
 --- a/web/src/routes/admin/users/[id]/+layout.svelte
 +++ b/web/src/routes/admin/users/[id]/+layout.svelte
 @@ -7,12 +7,20 @@
@@ -942,7 +1149,7 @@ index dc49e5f..f357ee9 100644
            <div class="flex gap-2 text-primary">
              <Icon icon={mdiCloudUploadOutline} size="1.5rem" />
 diff --git a/web/src/routes/admin/users/[id]/+layout.ts b/web/src/routes/admin/users/[id]/+layout.ts
-index 56e3a47..59035f0 100644
+index 56e3a470d..59035f039 100644
 --- a/web/src/routes/admin/users/[id]/+layout.ts
 +++ b/web/src/routes/admin/users/[id]/+layout.ts
 @@ -1,4 +1,10 @@
