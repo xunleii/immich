@@ -39,12 +39,17 @@ via `--export-patches`, after a sync done from GitHub).
   If no `fork-patches/` patch conflicts, the PR is merged automatically
   and `fork-build.yml` is triggered; otherwise the PR stays open, to be
   resolved with the skill (local path `./scripts/fork-sync.sh`).
-- `.github/workflows/fork-build.yml` — on every push to `fork` or on
-  dispatch after a `sync/<tag>` merge, builds + pushes
+- `.github/workflows/fork-build.yml` — on every push to `fork` (a
+  `sync/<tag>` PR merge included), builds + pushes
   `ghcr.io/<owner>/immich-server`. For a `sync/<tag>` merge: image
-  tagged `:<tag>`, `<tag>-fork` git tag + GitHub release.
-- No repo secret or setting to configure: everything runs off the
-  workflows' `GITHUB_TOKEN`.
+  tagged `:<tag>-fork`, `<tag>-fork` git tag + GitHub release.
+- Requires the `FORK_SYNC_TOKEN` secret — a PAT with `workflow` scope
+  (classic: `repo` + `workflow`; fine-grained: Contents RW + Pull
+  requests RW + Workflows RW). The built-in `GITHUB_TOKEN` cannot push
+  branches that touch `.github/workflows/**` (every upstream sync does),
+  and a `GITHUB_TOKEN`-authored merge would not trigger `fork-build.yml`.
+- The default branch must be `fork` (GitHub only runs `schedule` /
+  `workflow_dispatch` from the default branch).
 - The `fork-patches/*.patch` files are **not** regenerated
   automatically after a CI sync — run `./scripts/fork-sync.sh
   --export-patches` locally if you need an up-to-date `.patch`.

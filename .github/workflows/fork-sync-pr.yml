@@ -3,14 +3,16 @@ name: Fork sync PR (upstream release)
 # Every 6 h: if immich-app/immich has published a stable release that the
 # `fork` branch does not contain yet, push a `sync/<tag>` branch (= the
 # tagged upstream commit) and open a PR against `fork`.
-#   - no conflict with the fork-patches/ patches -> auto-merge, then
-#     trigger fork-build.yml (Docker image + git tag + release).
+#   - no conflict with the fork-patches/ patches -> auto-merge; the merge
+#     push then triggers fork-build.yml (Docker image + git tag + release).
 #   - conflict -> the PR stays open, to be resolved with the
 #     `fork-patch-sync` skill (`./scripts/fork-sync.sh`).
 #
-# No secret or repo setting required: everything runs off GITHUB_TOKEN
-# (permissions declared below) + an explicit workflow_dispatch to
-# fork-build.yml (dispatch is exempt from GitHub's anti-recursion rule).
+# Requires the FORK_SYNC_TOKEN secret: a PAT with `workflow` scope
+# (classic: repo + workflow / fine-grained: Contents RW + Pull requests
+# RW + Workflows RW). The built-in GITHUB_TOKEN cannot push branches that
+# touch .github/workflows/**, which upstream syncs do constantly, and a
+# GITHUB_TOKEN-authored merge would not trigger fork-build.yml.
 
 on:
   schedule:
@@ -28,7 +30,6 @@ concurrency:
 permissions:
   contents: write
   pull-requests: write
-  actions: write
 
 jobs:
   sync:
@@ -38,11 +39,12 @@ jobs:
         with:
           ref: fork
           fetch-depth: 0
+          token: ${{ secrets.FORK_SYNC_TOKEN }}
 
       - name: Resolve upstream release
         id: up
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
         run: |
           git remote add upstream https://github.com/immich-app/immich.git
           git fetch --tags --prune --quiet upstream
@@ -70,7 +72,7 @@ jobs:
         if: steps.gate.outputs.skip != 'true'
         id: pr
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
         run: |
           BR="sync/${{ steps.up.outputs.ref }}"
           git push -f origin '${{ steps.up.outputs.sha }}':"refs/heads/$BR"
@@ -82,10 +84,10 @@ jobs:
               --body "Automated. Merges on its own if no \`fork-patches/\` patch conflicts, then triggers the image build + release. On conflict, this PR stays open — resolve it with the \`fork-patch-sync\` skill (\`./scripts/fork-sync.sh\`)."
           fi
 
-      - name: Merge if conflict-free, then trigger build
+      - name: Merge if conflict-free
         if: steps.gate.outputs.skip != 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
         run: |
           BR='${{ steps.pr.outputs.branch }}'
           for i in $(seq 1 20); do
@@ -97,7 +99,6 @@ jobs:
           case "$M" in
             MERGEABLE)
               gh pr merge "$BR" --merge --delete-branch
-              gh workflow run fork-build.yml --ref fork
               echo "### Sync ${{ steps.up.outputs.ref }} merged :rocket:" >> "$GITHUB_STEP_SUMMARY"
               ;;
             CONFLICTING)

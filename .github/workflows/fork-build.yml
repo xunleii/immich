@@ -8,7 +8,7 @@ name: Build fork image
 # keep pulling ghcr.io/immich-app/immich-machine-learning.
 #
 # When the push is a `sync/<tag>` PR merge (see fork-sync-pr.yml), the
-# image also gets the `:<tag>` tag, and the `<tag>-fork` git tag +
+# image also gets the `:<tag>-fork` tag, and the `<tag>-fork` git tag +
 # matching GitHub release are created.
 
 on:
@@ -56,7 +56,7 @@ jobs:
           IS_RELEASE=false
           if [ -n "$UP" ] && ! git rev-parse -q --verify "refs/tags/${UP}-fork" >/dev/null; then
             IS_RELEASE=true
-            TAGS="${TAGS}"$'\n'"${IMAGE_NAME}:${UP}"
+            TAGS="${TAGS}"$'\n'"${IMAGE_NAME}:${UP}-fork"
           fi
 
           {
@@ -106,7 +106,7 @@ jobs:
             --title "${UP}-fork" \
             --notes "Fork of **immich-app/immich ${UP}** + the \`fork-patches/series\` patches.
 
-          Image: \`${IMAGE_NAME}:${UP}\` (also \`:latest\`)." \
+          Image: \`${IMAGE_NAME}:${UP}-fork\` (also \`:latest\`)." \
             || echo "release ${UP}-fork already exists"
 
       - name: Re-assert disabled workflows
@@ -130,7 +130,7 @@ jobs:
             echo "\`${IMAGE_NAME}:${{ steps.meta.outputs.date }}-${{ steps.meta.outputs.sha_short }}\`"
             echo ""
             if [ "${{ steps.meta.outputs.is_release }}" = "true" ]; then
-              echo "Release \`${{ steps.meta.outputs.upstream_version }}-fork\` — image also tagged \`:${{ steps.meta.outputs.upstream_version }}\`."
+              echo "Release \`${{ steps.meta.outputs.upstream_version }}-fork\` — image also tagged \`:${{ steps.meta.outputs.upstream_version }}-fork\`."
             else
               echo "Also tagged \`:latest\` and \`:fork\`."
             fi
